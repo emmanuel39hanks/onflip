@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Flip — parlay on anything. Agent-callable prediction-market execution ASP (Polymarket + Kalshi) with x402 payments on X Layer.",
+  "description": "Flip — agent-callable prediction-market execution ASP. Buy a single Polymarket/Kalshi outcome or combine up to 6 into one leveraged parlay, funded by one x402 payment (USDT on X Layer).",
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",

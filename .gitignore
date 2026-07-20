@@ -4,3 +4,7 @@ data
 *.log
 .next
 next-env.d.ts
+.agents
+.claude
+.DS_Store
+skills-lock.json
