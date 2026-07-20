@@ -74,11 +74,12 @@ function feeUsd(stakeUsd: number): number {
 
 const MANIFEST = {
   name: "Flip",
-  tagline: "Parlay on anything — agent-callable execution for prediction markets.",
+  tagline: "One payment. One position. Every market.",
   description:
-    "Combine markets from Polymarket and Kalshi into one leveraged position. " +
-    "Quote for free; place by paying stake + 1% fee in USDT on X Layer via x402. " +
-    "Deterministic pricing (independence product, correlation haircut, published edge).",
+    "Flip is a paid API for agents: combine live markets from Polymarket and Kalshi " +
+    "into a single position. Quote for free; place by paying stake + 1% fee in USDT " +
+    "on X Layer via x402. Deterministic pricing with a published edge, correlation " +
+    "haircut, and hard caps.",
   venues: ["polymarket", "kalshi"],
   payment: { protocol: "x402", network: "eip155:196", asset: "USDT" },
   endpoints: {
