@@ -30,14 +30,27 @@ interface QuoteCacheEntry {
 }
 const quoteCache = new Map<string, QuoteCacheEntry>();
 
-function json(res: ServerResponse, code: number, body: unknown) {
+function json(res: ServerResponse, code: number, body: unknown, extraHeaders?: Record<string, string>) {
   const text = JSON.stringify(body, null, 2);
   res.writeHead(code, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, X-IDEMPOTENCY-KEY",
+    "Access-Control-Expose-Headers": "X-PAYMENT-REQUIRED, X-PAYMENT-REQUIRED-EXTENSIONS",
+    ...(extraHeaders ?? {}),
   });
   res.end(text);
+}
+
+/**
+ * 402 with OKX/x402 SDK compatibility: the terms are ALSO base64-encoded
+ * in the X-PAYMENT-REQUIRED response header (what the OKX Payment SDK
+ * client reads), alongside the JSON body for human/other clients.
+ */
+function payment402(res: ServerResponse, requirement: ReturnType<typeof paymentRequirements>, error?: string) {
+  const header = Buffer.from(JSON.stringify(requirement)).toString("base64");
+  const body = error ? { ...requirement, error } : requirement;
+  json(res, 402, body, { "X-PAYMENT-REQUIRED": header });
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -81,10 +94,10 @@ const MANIFEST = {
   description:
     "Flip is a paid API for agents. Buy a single prediction-market outcome (a straight " +
     "YES/NO on Polymarket or Kalshi), or combine 2–6 markets into one leveraged parlay. " +
-    "Quote for free; place by paying stake + 1% fee in USDC on X Layer via x402. " +
+    "Quote for free; place by paying stake + 1% fee in USDT on X Layer via x402. " +
     "Deterministic pricing with a published edge, correlation haircut, and hard caps.",
   venues: ["polymarket", "kalshi"],
-  payment: { protocol: "x402", network: "eip155:196", asset: "USDC" },
+  payment: { protocol: "x402", network: "eip155:196", asset: "USDT" },
   endpoints: {
     "GET /markets?q=": "unified market search (free)",
     "POST /quote": "{ legs:[{venue,id,side}], stakeUsd } → 1 leg = single position, 2-6 = parlay (free)",
@@ -199,10 +212,10 @@ export function startHttp(port: number) {
 
         const paymentHeader = req.headers["x-payment"];
         if (!paymentHeader || typeof paymentHeader !== "string") {
-          return json(res, 402, requirement);
+          return payment402(res, requirement);
         }
         const result = await verifyAndSettle(paymentHeader, requirement.accepts[0]);
-        if (!result.paid) return json(res, 402, { ...requirement, error: result.error });
+        if (!result.paid) return payment402(res, requirement, result.error);
 
         const idem = String(req.headers["x-idempotency-key"] ?? body.quoteId);
         const ticket = tickets.create(

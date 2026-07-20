@@ -84,7 +84,7 @@ export function paymentRequirements(usd: number, resource: string, description: 
         scheme: "exact",
         network: "eip155:196",
         maxAmountRequired: usdToAtomic(usd),
-        asset: process.env.X402_ASSET ?? "0x74b7F16337b8972027F6196A17a631aC6dE26d22",
+        asset: process.env.X402_ASSET ?? "0x1E4a5963aBFD975d8c9021cE480b42188849D41d",
         payTo: process.env.X402_PAY_TO ?? "",
         resource,
         description,
