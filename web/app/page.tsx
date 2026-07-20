@@ -259,18 +259,25 @@ export default function Home() {
               </p>
             </div>
             <div className="grid gap-7 md:grid-cols-2">
-              <Link href="/playground" className="soft group rounded-3xl bg-card p-8 transition-transform hover:-translate-y-1">
-                <div className="term p-4">
-                  <span className="text-white/40">$</span> &quot;$5 says the Fed holds and bitcoin keeps climbing&quot;
+              <Link
+                href="/playground"
+                className="group rounded-3xl border border-line bg-card p-8 transition-colors hover:border-ink"
+              >
+                <div className="rounded-xl bg-[#1b1b1b] p-4 font-mono text-[12.5px] leading-[1.7]">
+                  <span className="text-white/40">$</span>{" "}
+                  <span className="text-white">&quot;$5 the Fed holds and bitcoin climbs&quot;</span>
                   <br />
-                  <span className="text-[#7ee2a8]">→ 93.3× · $5 → $466.50 · 2 legs, 2 venues</span>
+                  <span className="text-[#7ee2a8]">→ 93.3× · $5 → $466.50</span>
                 </div>
                 <h3 className="serif mt-6 text-3xl">Playground →</h3>
                 <p className="mt-2 text-[16px] text-muted">
                   A live request client against the real API — natural language or raw JSON.
                 </p>
               </Link>
-              <Link href="/docs" className="soft group rounded-3xl bg-card p-8 transition-transform hover:-translate-y-1">
+              <Link
+                href="/docs"
+                className="group rounded-3xl border border-line bg-card p-8 transition-colors hover:border-ink"
+              >
                 <div className="rounded-xl bg-bg p-4 font-mono text-[12.5px] leading-[1.7] text-muted">
                   Introduction · Quickstart · Payments (x402)
                   <br />
@@ -278,7 +285,7 @@ export default function Home() {
                 </div>
                 <h3 className="serif mt-6 text-3xl">Documentation →</h3>
                 <p className="mt-2 text-[16px] text-muted">
-                  GitBook-style guides plus the full OpenAPI reference with schemas.
+                  Integration guides plus the full OpenAPI reference with schemas.
                 </p>
               </Link>
             </div>
