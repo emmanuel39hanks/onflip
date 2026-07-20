@@ -20,6 +20,7 @@ import { tickets } from "./parlay/tickets.js";
 import { paymentRequirements, verifyAndSettle } from "./x402.js";
 import { parseNl, NL_PROVENANCE } from "./nl.js";
 import { buildOpenApi } from "./openapi.js";
+import { allowNl, allowWrite, clientIp, takeModelBudget } from "./ratelimit.js";
 
 const SERVICE_FEE_BPS = 100; // 1% of stake, on top, min $0.10
 
@@ -109,10 +110,16 @@ export function startHttp(port: number) {
       }
 
       if (path === "/nl/quote" && req.method === "POST") {
+        const ip = clientIp(req.headers);
+        if (!allowNl(ip)) {
+          return json(res, 429, { error: "slow down — 5 NL quotes per minute per caller" });
+        }
         const body = (await readBody(req)) as { text?: string };
         const text = String(body.text ?? "").slice(0, 400);
         if (text.trim().length < 8) return json(res, 400, { error: "describe your view in a sentence" });
-        const parsed = await parseNl(text);
+        // Model calls draw from a global daily budget; past it, the free
+        // keyword engine answers — the endpoint never becomes a proxy.
+        const parsed = await parseNl(text, takeModelBudget());
         if (parsed.legs.length < 2) {
           return json(res, 422, {
             error: "could not map that to at least 2 live markets — try naming the events",
@@ -152,6 +159,9 @@ export function startHttp(port: number) {
       }
 
       if (path === "/parlay/quote" && req.method === "POST") {
+        if (!allowWrite(clientIp(req.headers))) {
+          return json(res, 429, { error: "rate limited — 30 requests per minute" });
+        }
         const body = (await readBody(req)) as { legs?: LegRequest[]; stakeUsd?: number };
         const stakeUsd = Number(body.stakeUsd ?? 5);
         const legs = await priceLegs(body.legs ?? [], stakeUsd);
@@ -168,6 +178,9 @@ export function startHttp(port: number) {
       }
 
       if (path === "/parlay/place" && req.method === "POST") {
+        if (!allowWrite(clientIp(req.headers))) {
+          return json(res, 429, { error: "rate limited — 30 requests per minute" });
+        }
         const body = (await readBody(req)) as { quoteId?: string };
         const entry = body.quoteId ? quoteCache.get(body.quoteId) : undefined;
         if (!entry) return json(res, 400, { error: "unknown quoteId — call /parlay/quote first" });

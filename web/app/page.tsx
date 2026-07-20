@@ -1,11 +1,10 @@
-import { Playground } from "@/components/Playground";
+import Link from "next/link";
+import { FlipMark, XIcon } from "@/components/FlipMark";
 
-const API = "https://api-production-6db83.up.railway.app"; // → api.onflip.xyz once DNS lands
+const API = "https://api.onflip.xyz";
 
-const LOGO_POLYMARKET =
-  "https://cdn.brandfetch.io/polymarket.com/h/56/theme/dark/fallback/404/type/logo?c=1idwndMAtLwjnpW7fjr";
-const LOGO_KALSHI =
-  "https://cdn.brandfetch.io/kalshi.com/h/56/theme/dark/fallback/404/type/logo?c=1idwndMAtLwjnpW7fjr";
+const LOGO_POLYMARKET = "/logos/polymarket.svg";
+const LOGO_KALSHI = "/logos/kalshi.svg";
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
@@ -134,18 +133,19 @@ export default function Home() {
       <nav className="sticky top-0 z-50 bg-bg/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
           <div className="flex items-center gap-10">
-            <span className="serif text-2xl font-medium italic">
-              Flip<span className="text-green">.</span>
+            <span className="flex items-center gap-2.5">
+              <FlipMark size={28} />
+              <span className="text-[22px] font-extrabold tracking-tight">Flip</span>
             </span>
             <div className="hidden gap-8 text-[15px] font-semibold text-muted sm:flex">
-              <a href="#playground" className="hover:text-ink">Playground</a>
-              <a href="#docs" className="hover:text-ink">Docs</a>
+              <Link href="/playground" className="hover:text-ink">Playground</Link>
+              <Link href="/docs" className="hover:text-ink">Docs</Link>
               <a href="#faq" className="hover:text-ink">FAQ</a>
             </div>
           </div>
-          <a href={`${API}/openapi.json`} className="pill text-sm">
-            OpenAPI spec
-          </a>
+          <Link href="/playground" className="pill text-sm">
+            <strong>Try it live</strong>
+          </Link>
         </div>
       </nav>
 
@@ -167,12 +167,12 @@ export default function Home() {
             HTTP&nbsp;402.
           </p>
           <div className="rise d3 mt-9 flex justify-center gap-3">
-            <a href="#playground" className="pill">
+            <Link href="/playground" className="pill">
               <strong>Try the playground</strong>
-            </a>
-            <a href="#docs" className="pill-light relative">
+            </Link>
+            <Link href="/docs" className="pill-light relative">
               Read the docs
-            </a>
+            </Link>
           </div>
 
           {/* floating cards over pastel portal */}
@@ -246,8 +246,8 @@ export default function Home() {
           </div>
         </section>
 
-        {/* playground */}
-        <section id="playground" className="px-6 py-16">
+        {/* playground + docs teasers */}
+        <section className="px-6 py-16">
           <div className="mx-auto max-w-6xl">
             <div className="mb-12 text-center">
               <Badge>Powered by 0G Compute · TEE-attested</Badge>
@@ -256,10 +256,33 @@ export default function Home() {
               </h2>
               <p className="mx-auto mt-5 max-w-md text-[19px] tracking-tight text-muted">
                 Describe a view in plain English — 0G maps it to live markets, the deterministic
-                engine prices it. Or send raw JSON.
+                engine prices it.
               </p>
             </div>
-            <Playground api={API} />
+            <div className="grid gap-7 md:grid-cols-2">
+              <Link href="/playground" className="soft group rounded-3xl bg-card p-8 transition-transform hover:-translate-y-1">
+                <div className="term p-4">
+                  <span className="text-white/40">$</span> &quot;$5 says the Fed holds and bitcoin keeps climbing&quot;
+                  <br />
+                  <span className="text-[#7ee2a8]">→ 93.3× · $5 → $466.50 · 2 legs, 2 venues</span>
+                </div>
+                <h3 className="serif mt-6 text-3xl">Playground →</h3>
+                <p className="mt-2 text-[16px] text-muted">
+                  A live request client against the real API — natural language or raw JSON.
+                </p>
+              </Link>
+              <Link href="/docs" className="soft group rounded-3xl bg-card p-8 transition-transform hover:-translate-y-1">
+                <div className="rounded-xl bg-bg p-4 font-mono text-[12.5px] leading-[1.7] text-muted">
+                  Introduction · Quickstart · Payments (x402)
+                  <br />
+                  Endpoints · Pricing model · Rate limits
+                </div>
+                <h3 className="serif mt-6 text-3xl">Documentation →</h3>
+                <p className="mt-2 text-[16px] text-muted">
+                  GitBook-style guides plus the full OpenAPI reference with schemas.
+                </p>
+              </Link>
+            </div>
           </div>
         </section>
 
@@ -269,10 +292,10 @@ export default function Home() {
             <div className="mb-12 text-center">
               <h2 className="serif text-5xl tracking-tight sm:text-[58px]">The API</h2>
               <p className="mx-auto mt-4 max-w-md text-[19px] tracking-tight text-muted">
-                Six endpoints, one paid. Full schemas in the{" "}
-                <a className="font-semibold text-ink underline" href={`${API}/openapi.json`}>
-                  OpenAPI spec
-                </a>
+                Six endpoints, one paid. Full guides in the{" "}
+                <Link className="font-semibold text-ink underline" href="/docs">
+                  documentation
+                </Link>
                 .
               </p>
             </div>
@@ -386,48 +409,70 @@ export default function Home() {
         </section>
       </main>
 
-      {/* dark footer */}
-      <footer className="noise -mt-16 bg-gradient-to-b from-dark to-[#1b1b1b] pt-32 text-white">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mb-16 grid gap-10 sm:grid-cols-3">
+      {/* footer */}
+      <footer
+        className="noise -mt-16 pt-28 text-white"
+        style={{ background: "linear-gradient(#393737, #1b1b1b)" }}
+      >
+        <div className="mx-auto max-w-6xl px-6 pb-10">
+          <div className="mb-14 grid gap-10 sm:grid-cols-[1.2fr_1fr_1fr_1fr]">
             <div>
-              <div className="mb-4 font-semibold">The Good</div>
+              <div className="flex items-center gap-2.5">
+                <FlipMark size={26} />
+                <span className="text-xl font-extrabold tracking-tight">Flip</span>
+              </div>
+              <p className="mt-4 max-w-[240px] text-[14.5px] leading-relaxed text-white/50">
+                One payment. One position. Every market. Built for the agent economy on OKX.AI.
+              </p>
+              <a
+                href="https://x.com/onflip_xyz"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Flip on X"
+                className="mt-5 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+              >
+                <XIcon size={16} />
+              </a>
+            </div>
+            <div>
+              <div className="mb-4 text-sm font-semibold text-white/80">Product</div>
               {[
-                ["Playground", "#playground"],
-                ["Docs", "#docs"],
+                ["Playground", "/playground"],
+                ["Documentation", "/docs"],
                 ["OpenAPI spec", `${API}/openapi.json`],
               ].map(([t, h]) => (
-                <a key={t} href={h} className="mb-3 block text-lg text-white/50 hover:text-white">
+                <a key={t} href={h} className="mb-3 block text-[15px] text-white/50 hover:text-white">
                   {t}
                 </a>
               ))}
             </div>
             <div>
-              <div className="mb-4 font-semibold">The Boring</div>
+              <div className="mb-4 text-sm font-semibold text-white/80">Developers</div>
               {[
                 ["GitHub", "https://github.com/emmanuel39hanks/onflip"],
-                ["Status", `${API}/health`],
+                ["API status", `${API}/health`],
                 ["Audit trail", `${API}/tickets`],
               ].map(([t, h]) => (
-                <a key={t} href={h} className="mb-3 block text-lg text-white/50 hover:text-white">
+                <a key={t} href={h} className="mb-3 block text-[15px] text-white/50 hover:text-white">
                   {t}
                 </a>
               ))}
             </div>
             <div>
-              <div className="mb-4 font-semibold">The Cool</div>
-              <p className="text-lg leading-relaxed text-white/50">
-                Markets from Polymarket &amp; Kalshi.
+              <div className="mb-4 text-sm font-semibold text-white/80">Stack</div>
+              <p className="text-[15px] leading-relaxed text-white/50">
+                Markets: Polymarket &amp; Kalshi
                 <br />
-                Payments in USDT on X Layer.
+                Payments: USDT on X Layer
                 <br />
-                NL parsing on 0G Compute.
+                Inference: 0G Compute
               </p>
             </div>
           </div>
-        </div>
-        <div className="serif select-none overflow-hidden text-center text-[26vw] italic leading-[0.72] tracking-tight text-white">
-          Flip
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-6 text-[13px] text-white/40">
+            <span>© 2026 Flip · onflip.xyz</span>
+            <span className="font-mono text-[11px]">eip155:196 · x402 · listed on OKX.AI</span>
+          </div>
         </div>
       </footer>
     </div>
