@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Flip \u2014 parlay on anything. Agent-callable prediction-market execution ASP (Polymarket + Kalshi) with x402 payments on X Layer.",
+  "description": "Flip — parlay on anything. Agent-callable prediction-market execution ASP (Polymarket + Kalshi) with x402 payments on X Layer.",
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
@@ -16,5 +16,8 @@
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   },
-  "packageManager": "pnpm@9.15.9"
+  "packageManager": "pnpm@9.15.9",
+  "dependencies": {
+    "viem": "^2.55.4"
+  }
 }

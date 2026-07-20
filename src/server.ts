@@ -77,19 +77,21 @@ function feeUsd(stakeUsd: number): number {
 
 const MANIFEST = {
   name: "Flip",
-  tagline: "One payment. One position. Every market.",
+  tagline: "Turn conviction into a position — one x402 payment.",
   description:
-    "Flip is a paid API for agents: combine live markets from Polymarket and Kalshi " +
-    "into a single position. Quote for free; place by paying stake + 1% fee in USDT " +
-    "on X Layer via x402. Deterministic pricing with a published edge, correlation " +
-    "haircut, and hard caps.",
+    "Flip is a paid API for agents. Buy a single prediction-market outcome (a straight " +
+    "YES/NO on Polymarket or Kalshi), or combine 2–6 markets into one leveraged parlay. " +
+    "Quote for free; place by paying stake + 1% fee in USDT on X Layer via x402. " +
+    "Deterministic pricing with a published edge, correlation haircut, and hard caps.",
   venues: ["polymarket", "kalshi"],
   payment: { protocol: "x402", network: "eip155:196", asset: "USDT" },
   endpoints: {
     "GET /markets?q=": "unified market search (free)",
-    "POST /parlay/quote": "{ legs:[{venue,id,side}], stakeUsd } → multiplier + quoteId (free)",
-    "POST /parlay/place": "{ quoteId } + X-PAYMENT (stake+fee) → ticket",
-    "GET /parlay/:id": "ticket status (free)",
+    "POST /quote": "{ legs:[{venue,id,side}], stakeUsd } → 1 leg = single position, 2-6 = parlay (free)",
+    "POST /place": "{ quoteId } + X-PAYMENT (stake+fee) → ticket",
+    "POST /nl/quote": "{ text } → natural-language → quoted position (free)",
+    "GET /position/:id": "ticket status (free)",
+    "aliases": "/parlay/quote, /parlay/place, /parlay/:id also work",
   },
 };
 
@@ -120,9 +122,9 @@ export function startHttp(port: number) {
         // Model calls draw from a global daily budget; past it, the free
         // keyword engine answers — the endpoint never becomes a proxy.
         const parsed = await parseNl(text, takeModelBudget());
-        if (parsed.legs.length < 2) {
+        if (parsed.legs.length < 1) {
           return json(res, 422, {
-            error: "could not map that to at least 2 live markets — try naming the events",
+            error: "could not map that to a live market — try naming the event",
             interpretation: parsed.interpretation,
             engine: parsed.engine,
             legs: parsed.legs,
@@ -158,7 +160,7 @@ export function startHttp(port: number) {
         return json(res, 200, { markets: [...pm, ...ks] });
       }
 
-      if (path === "/parlay/quote" && req.method === "POST") {
+      if ((path === "/parlay/quote" || path === "/quote") && req.method === "POST") {
         if (!allowWrite(clientIp(req.headers))) {
           return json(res, 429, { error: "rate limited — 30 requests per minute" });
         }
@@ -177,7 +179,7 @@ export function startHttp(port: number) {
         });
       }
 
-      if (path === "/parlay/place" && req.method === "POST") {
+      if ((path === "/parlay/place" || path === "/place") && req.method === "POST") {
         if (!allowWrite(clientIp(req.headers))) {
           return json(res, 429, { error: "rate limited — 30 requests per minute" });
         }
@@ -211,8 +213,8 @@ export function startHttp(port: number) {
         return json(res, 201, { ticket, payment: result });
       }
 
-      if (path.startsWith("/parlay/") && req.method === "GET") {
-        const t = tickets.get(path.slice("/parlay/".length));
+      if ((path.startsWith("/parlay/") || path.startsWith("/position/")) && req.method === "GET") {
+        const t = tickets.get(path.replace(/^\/(parlay|position)\//, ""));
         if (!t) return json(res, 404, { error: "ticket not found" });
         return json(res, 200, { ticket: t });
       }

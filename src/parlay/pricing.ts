@@ -31,6 +31,8 @@ export function pricingFromEnv(): PricingConfig {
 }
 
 export interface ParlayPrice {
+  /** "single" = one market (a straight YES/NO buy); "parlay" = 2+ legs. */
+  type: "single" | "parlay";
   legs: PricedLeg[];
   fairMultiplier: number;
   correlationHaircut: number;
@@ -45,7 +47,7 @@ export function priceParlay(
   stakeUsd: number,
   cfg: PricingConfig
 ): ParlayPrice {
-  if (legs.length < 2) throw new PricingError("a parlay needs at least 2 legs");
+  if (legs.length < 1) throw new PricingError("need at least 1 leg");
   if (legs.length > cfg.maxLegs) throw new PricingError(`max ${cfg.maxLegs} legs`);
   if (!(stakeUsd > 0)) throw new PricingError("stake must be positive");
   if (stakeUsd > cfg.maxStakeUsd) throw new PricingError(`max stake $${cfg.maxStakeUsd}`);
@@ -80,8 +82,8 @@ export function priceParlay(
     offered = cfg.maxMultiplier;
     warnings.push(`multiplier capped at ${cfg.maxMultiplier}x`);
   }
-  offered = Math.floor(offered * 10) / 10;
-  if (offered <= 1) throw new PricingError("parlay prices out below 1x — pick longer odds");
+  offered = Math.floor(offered * 100) / 100;
+  if (offered <= 1) throw new PricingError("prices out at ≤1x after edge — pick longer odds");
 
   let payout = stakeUsd * offered;
   if (payout > cfg.maxPayoutUsd) {
@@ -90,6 +92,7 @@ export function priceParlay(
   }
 
   return {
+    type: legs.length === 1 ? "single" : "parlay",
     legs,
     fairMultiplier: Math.round(fair * 100) / 100,
     correlationHaircut: haircut,
