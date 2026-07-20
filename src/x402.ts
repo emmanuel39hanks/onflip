@@ -95,6 +95,25 @@ export function paymentRequirements(usd: number, resource: string, description: 
   };
 }
 
+/** Fields OKX-style facilitators use to report why a call failed. */
+interface FacilitatorBody {
+  code?: string | number;
+  msg?: string;
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Collapse a failed facilitator response into one readable reason, preserving
+ * OKX's code/message so an auth failure (e.g. bad passphrase) is distinguishable
+ * from a genuine payment rejection — both for buyers and for our own debugging.
+ */
+function facilitatorError(stage: string, status: number, primary: string | undefined, body: FacilitatorBody): string {
+  const reason = primary ?? body.msg ?? body.message ?? body.error ?? `HTTP ${status}`;
+  const code = body.code !== undefined && body.code !== "" ? ` [${body.code}]` : "";
+  return `${stage}: ${reason}${code}`;
+}
+
 export async function verifyAndSettle(
   paymentHeader: string,
   requirement: PaymentRequirement
@@ -124,24 +143,28 @@ export async function verifyAndSettle(
       headers: okxHeaders("POST", `${base}/verify`, body),
       body,
     });
-    const vJson = (await verify.json()) as { isValid?: boolean; valid?: boolean; invalidReason?: string };
-    if (!(vJson.isValid ?? vJson.valid)) {
-      return { paid: false, simulated: false, error: vJson.invalidReason ?? "payment invalid" };
+    const vJson = (await verify.json().catch(() => ({}))) as FacilitatorBody & {
+      isValid?: boolean;
+      valid?: boolean;
+      invalidReason?: string;
+    };
+    if (!verify.ok || !(vJson.isValid ?? vJson.valid)) {
+      return { paid: false, simulated: false, error: facilitatorError("verify", verify.status, vJson.invalidReason, vJson) };
     }
     const settle = await fetch(`${base}/settle`, {
       method: "POST",
       headers: okxHeaders("POST", `${base}/settle`, body),
       body,
     });
-    const sJson = (await settle.json()) as {
+    const sJson = (await settle.json().catch(() => ({}))) as FacilitatorBody & {
       success?: boolean;
       txHash?: string;
       transaction?: string;
       payer?: string;
       errorReason?: string;
     };
-    if (!sJson.success) {
-      return { paid: false, simulated: false, error: sJson.errorReason ?? "settlement failed" };
+    if (!settle.ok || !sJson.success) {
+      return { paid: false, simulated: false, error: facilitatorError("settle", settle.status, sJson.errorReason, sJson) };
     }
     return {
       paid: true,
