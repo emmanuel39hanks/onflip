@@ -1,7 +1,0 @@
-node_modules
-web/node_modules
-web/.next
-data
-.env
-.git
-*.log

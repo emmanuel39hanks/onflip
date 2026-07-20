@@ -1,7 +1,8 @@
 node_modules
-web
+web/node_modules
 data
 .env
 .git
 *.log
 .next
+web/.next
