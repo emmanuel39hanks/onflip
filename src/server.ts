@@ -81,10 +81,10 @@ const MANIFEST = {
   description:
     "Flip is a paid API for agents. Buy a single prediction-market outcome (a straight " +
     "YES/NO on Polymarket or Kalshi), or combine 2–6 markets into one leveraged parlay. " +
-    "Quote for free; place by paying stake + 1% fee in USDT on X Layer via x402. " +
+    "Quote for free; place by paying stake + 1% fee in USDC on X Layer via x402. " +
     "Deterministic pricing with a published edge, correlation haircut, and hard caps.",
   venues: ["polymarket", "kalshi"],
-  payment: { protocol: "x402", network: "eip155:196", asset: "USDT" },
+  payment: { protocol: "x402", network: "eip155:196", asset: "USDC" },
   endpoints: {
     "GET /markets?q=": "unified market search (free)",
     "POST /quote": "{ legs:[{venue,id,side}], stakeUsd } → 1 leg = single position, 2-6 = parlay (free)",
