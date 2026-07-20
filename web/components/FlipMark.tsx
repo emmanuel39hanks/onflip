@@ -1,18 +1,7 @@
-/** The Flip mark — recreated from the brand asset as crisp SVG. */
-export function FlipMark({ size = 28 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="currentColor" aria-label="Flip">
-      <rect x="12" y="16" width="22" height="22" rx="5" />
-      <rect x="48" y="16" width="22" height="22" rx="5" />
-      <rect x="76" y="16" width="6" height="22" rx="3" />
-      <rect x="87" y="16" width="6" height="22" rx="3" />
-      <rect x="39" y="39" width="22" height="22" rx="5" />
-      <rect x="12" y="62" width="22" height="22" rx="5" />
-      <rect x="48" y="62" width="22" height="22" rx="5" />
-      <rect x="76" y="62" width="6" height="22" rx="3" />
-      <rect x="87" y="62" width="6" height="22" rx="3" />
-    </svg>
-  );
+/** Flip logo — the real asset from /public/logos/logo.svg. */
+export function FlipMark({ height = 22, className = "" }: { height?: number; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src="/logos/logo.svg" alt="Flip" height={height} style={{ height }} className={`w-auto ${className}`} />;
 }
 
 export function XIcon({ size = 18 }: { size?: number }) {

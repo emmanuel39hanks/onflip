@@ -50,8 +50,7 @@ export default function DocsPage() {
       <nav className="sticky top-0 z-50 border-b border-line bg-bg/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex items-center gap-2.5">
-            <FlipMark size={24} />
-            <span className="text-lg font-extrabold tracking-tight">Flip</span>
+            <FlipMark height={20} />
             <span className="ml-2 rounded-md bg-mint px-2 py-0.5 text-xs font-bold text-green">Docs</span>
           </Link>
           <div className="flex items-center gap-6 text-sm font-semibold text-muted">

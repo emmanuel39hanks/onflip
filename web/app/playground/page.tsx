@@ -17,8 +17,7 @@ export default function PlaygroundPage() {
       <nav className="sticky top-0 z-50 bg-bg/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
           <Link href="/" className="flex items-center gap-2.5">
-            <FlipMark size={26} />
-            <span className="text-xl font-extrabold tracking-tight">Flip</span>
+            <FlipMark height={22} />
           </Link>
           <div className="flex items-center gap-8 text-[15px] font-semibold text-muted">
             <Link href="/" className="hover:text-ink">Home</Link>

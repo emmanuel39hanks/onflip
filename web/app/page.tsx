@@ -133,10 +133,9 @@ export default function Home() {
       <nav className="sticky top-0 z-50 bg-bg/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
           <div className="flex items-center gap-10">
-            <span className="flex items-center gap-2.5">
-              <FlipMark size={28} />
-              <span className="text-[22px] font-extrabold tracking-tight">Flip</span>
-            </span>
+            <Link href="/" className="text-ink">
+              <FlipMark height={24} />
+            </Link>
             <div className="hidden gap-8 text-[15px] font-semibold text-muted sm:flex">
               <Link href="/playground" className="hover:text-ink">Playground</Link>
               <Link href="/docs" className="hover:text-ink">Docs</Link>
@@ -196,9 +195,9 @@ export default function Home() {
               live markets from
             </span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={LOGO_POLYMARKET} alt="Polymarket" className="h-5 w-auto" />
+            <img src={LOGO_POLYMARKET} alt="Polymarket" className="h-[22px] w-auto" />
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={LOGO_KALSHI} alt="Kalshi" className="h-5 w-auto" />
+            <img src={LOGO_KALSHI} alt="Kalshi" className="h-[26px] w-auto" />
             <span className="font-mono text-[11px] uppercase tracking-widest text-muted">
               · payments on x layer
             </span>
@@ -417,10 +416,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 pb-10">
           <div className="mb-14 grid gap-10 sm:grid-cols-[1.2fr_1fr_1fr_1fr]">
             <div>
-              <div className="flex items-center gap-2.5">
-                <FlipMark size={26} />
-                <span className="text-xl font-extrabold tracking-tight">Flip</span>
-              </div>
+              <FlipMark height={26} className="[filter:invert(1)]" />
               <p className="mt-4 max-w-[240px] text-[14.5px] leading-relaxed text-white/50">
                 One payment. One position. Every market. Built for the agent economy on OKX.AI.
               </p>
