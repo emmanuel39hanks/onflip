@@ -1,19 +1,11 @@
-# Flip — landing site (Next.js standalone). Built from repo root context;
-# RAILWAY_DOCKERFILE_PATH=web.Dockerfile selects this for the web service.
-FROM node:22-slim AS build
+# Flip landing — plain `next start` (serves public/ natively).
+FROM node:22-slim
 WORKDIR /app
 RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ .
 RUN pnpm build
-
-FROM node:22-slim AS run
-WORKDIR /app
-ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./.next/static
-# Next standalone does NOT bundle public/ — without this every /logos/* 404s.
-COPY --from=build /app/public ./public
-EXPOSE 3000
-CMD ["node", "server.js"]
+ENV NODE_ENV=production
+# Bind to Railway's injected $PORT (fallback 3020 for local).
+CMD ["sh", "-c", "node_modules/.bin/next start -H 0.0.0.0 -p ${PORT:-3020}"]
