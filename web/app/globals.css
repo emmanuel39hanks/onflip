@@ -1,58 +1,113 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #ffffff;
-  --fg: #0a0a0a;
-  --gray-1: #fafafa;
-  --gray-2: #f2f2f2;
-  --line: #e5e5e5;
-  --muted: #666666;
-  --faint: #999999;
-  --term: #0a0a0a;
-  --term-fg: #e5e5e5;
-  --green: #16a34a;
-  --red: #dc2626;
-  --amber: #d97706;
-  --blue: #0068d6;
+  --bg: #f7f7f7;
+  --ink: #393737;
+  --muted: #888787;
+  --line: #f0efef;
+  --card: #ffffff;
+  --dark: #393737;
+  --dark-2: #1b1b1b;
+  --mint: #ebf6f2;
+  --blue: #e9eff6;
+  --lilac: #f2eff5;
+  --peach: #fef1d8;
+  --green: #0e9f6e;
+  --red: #d64545;
 }
 
 @theme inline {
   --color-bg: var(--bg);
-  --color-fg: var(--fg);
-  --color-line: var(--line);
+  --color-ink: var(--ink);
   --color-muted: var(--muted);
-  --color-faint: var(--faint);
-  --color-term: var(--term);
+  --color-line: var(--line);
+  --color-card: var(--card);
+  --color-dark: var(--dark);
+  --color-mint: var(--mint);
+  --color-blu: var(--blue);
+  --color-lilac: var(--lilac);
   --color-green: var(--green);
   --color-red: var(--red);
-  --color-amber: var(--amber);
-  --color-blue: var(--blue);
+  --font-serif: var(--font-newsreader);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--bg);
-  color: var(--fg);
+  color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
+.serif { font-family: var(--font-serif); font-weight: 400; }
 .tabular { font-variant-numeric: tabular-nums; }
 
-@keyframes rise {
-  from { opacity: 0; transform: translateY(14px); }
+/* Popcorn conic pastel glow */
+.glow {
+  position: absolute;
+  inset: -8px;
+  border-radius: inherit;
+  filter: blur(8px);
+  z-index: 0;
+  background-image: conic-gradient(
+    from 180deg,
+    #ebf6f2 0deg, #e7f3e0 56deg, #e5eff8 119deg, #fef1d8 176deg,
+    #f7f4fa 238deg, #f7dbe5 295deg, #ebf6f2 360deg
+  );
+}
+
+/* soft card shadow */
+.soft { box-shadow: rgba(0, 0, 0, 0.05) 0px 4px 20px 0px; }
+
+/* noise overlay for pastel tiles + dark panels */
+.noise {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+
+/* pill button */
+.pill {
+  border-radius: 100px;
+  background: var(--dark);
+  color: #fff;
+  font-weight: 600;
+  padding: 12px 30px;
+  display: inline-block;
+  transition: transform 0.15s ease, opacity 0.15s;
+}
+.pill:hover { transform: translateY(-1px); opacity: 0.92; }
+.pill-light {
+  border-radius: 100px;
+  background: rgba(247, 247, 247, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 11px 18px;
+  position: relative;
+  z-index: 2;
+  display: inline-block;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.rise { animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-.d1 { animation-delay: 0.06s; }
-.d2 { animation-delay: 0.12s; }
-.d3 { animation-delay: 0.18s; }
-.d4 { animation-delay: 0.24s; }
+.rise { animation: fadeUp 0.65s ease-in-out both; }
+.d1 { animation-delay: 0.1s; } .d2 { animation-delay: 0.16s; }
+.d3 { animation-delay: 0.22s; } .d4 { animation-delay: 0.3s; }
 
-@keyframes blink { 50% { opacity: 0; } }
-.cursor::after {
-  content: "▌";
-  animation: blink 1.1s steps(1) infinite;
-  color: var(--term-fg);
+/* code blocks */
+.term {
+  background: var(--dark-2);
+  color: #e7e7e7;
+  border-radius: 16px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
 }
+
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] .chev { transform: rotate(180deg); }
+.chev { transition: transform 0.2s ease; }

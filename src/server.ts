@@ -18,6 +18,8 @@ import type { LegRequest, PricedLeg } from "./venues/types.js";
 import { priceParlay, pricingFromEnv, PricingError, type ParlayPrice } from "./parlay/pricing.js";
 import { tickets } from "./parlay/tickets.js";
 import { paymentRequirements, verifyAndSettle } from "./x402.js";
+import { parseNl, NL_PROVENANCE } from "./nl.js";
+import { buildOpenApi } from "./openapi.js";
 
 const SERVICE_FEE_BPS = 100; // 1% of stake, on top, min $0.10
 
@@ -99,6 +101,44 @@ export function startHttp(port: number) {
       if (req.method === "OPTIONS") return json(res, 204, {});
       if (path === "/" && req.method === "GET") return json(res, 200, MANIFEST);
       if (path === "/health") return json(res, 200, { ok: true, ts: Date.now() });
+
+      if (path === "/openapi.json" && req.method === "GET") {
+        const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost:8080");
+        const proto = String(req.headers["x-forwarded-proto"] ?? "http");
+        return json(res, 200, buildOpenApi(`${proto}://${host}`));
+      }
+
+      if (path === "/nl/quote" && req.method === "POST") {
+        const body = (await readBody(req)) as { text?: string };
+        const text = String(body.text ?? "").slice(0, 400);
+        if (text.trim().length < 8) return json(res, 400, { error: "describe your view in a sentence" });
+        const parsed = await parseNl(text);
+        if (parsed.legs.length < 2) {
+          return json(res, 422, {
+            error: "could not map that to at least 2 live markets — try naming the events",
+            interpretation: parsed.interpretation,
+            engine: parsed.engine,
+            legs: parsed.legs,
+          });
+        }
+        const priced = await priceLegs(parsed.legs, parsed.stakeUsd);
+        const price = priceParlay(priced, parsed.stakeUsd, pricingFromEnv());
+        const id = quoteId(price);
+        quoteCache.set(id, { price, expiresAt: Date.now() + 90_000 });
+        return json(res, 200, {
+          interpretation: parsed.interpretation,
+          engine: parsed.engine,
+          provenance: parsed.engine === "0g" ? NL_PROVENANCE : undefined,
+          legs: parsed.legs,
+          quote: {
+            quoteId: id,
+            validForSeconds: 90,
+            ...price,
+            serviceFeeUsd: feeUsd(parsed.stakeUsd),
+            totalChargeUsd: Math.round((parsed.stakeUsd + feeUsd(parsed.stakeUsd)) * 100) / 100,
+          },
+        });
+      }
 
       if (path === "/markets" && req.method === "GET") {
         const q = url.searchParams.get("q") ?? "";

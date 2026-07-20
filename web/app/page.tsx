@@ -1,339 +1,435 @@
-const API = "https://api.onflip.xyz"; // set to your Railway URL
+import { Playground } from "@/components/Playground";
+
+const API = "https://api-production-6db83.up.railway.app"; // → api.onflip.xyz once DNS lands
 
 const LOGO_POLYMARKET =
   "https://cdn.brandfetch.io/polymarket.com/h/56/theme/dark/fallback/404/type/logo?c=1idwndMAtLwjnpW7fjr";
 const LOGO_KALSHI =
   "https://cdn.brandfetch.io/kalshi.com/h/56/theme/dark/fallback/404/type/logo?c=1idwndMAtLwjnpW7fjr";
 
-/* ------------------------------- terminal -------------------------------- */
-
-function Terminal({
-  title,
-  lines,
-  className = "",
-}: {
-  title: string;
-  lines: { t: "cmd" | "out" | "ok" | "warn"; s: string }[];
-  className?: string;
-}) {
+function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <div className={`overflow-hidden rounded-lg border border-line bg-term shadow-sm ${className}`}>
-      <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
-        <span className="ml-2 font-mono text-[11px] text-white/40">{title}</span>
-      </div>
-      <pre className="overflow-x-auto px-4 py-4 font-mono text-[12px] leading-[1.7]">
-        {lines.map((l, i) => (
-          <div key={i}>
-            {l.t === "cmd" ? (
-              <span className="text-white">
-                <span className="text-white/40">$ </span>
-                {l.s}
-              </span>
-            ) : l.t === "ok" ? (
-              <span className="text-[#4ade80]">{l.s}</span>
-            ) : l.t === "warn" ? (
-              <span className="text-[#fbbf24]">{l.s}</span>
-            ) : (
-              <span className="text-white/60">{l.s}</span>
-            )}
-          </div>
-        ))}
-      </pre>
+    <div className="relative inline-block">
+      <span className="pill-light">{children}</span>
+      <div className="glow opacity-70" />
     </div>
   );
 }
 
-/* --------------------------------- page ---------------------------------- */
+/* ------------------------------- hero cards ------------------------------ */
+
+function QuoteCard() {
+  return (
+    <div className="soft w-[290px] -rotate-6 rounded-3xl bg-card p-5">
+      <p className="font-mono text-[10px] uppercase tracking-widest text-muted">POST /parlay/quote</p>
+      <div className="mt-3 space-y-2 text-[13px] font-medium">
+        <div className="flex items-center justify-between rounded-xl bg-bg px-3 py-2">
+          <span className="truncate pr-2">Fed holds in July</span>
+          <span className="font-mono text-red">NO ·.076</span>
+        </div>
+        <div className="flex items-center justify-between rounded-xl bg-bg px-3 py-2">
+          <span className="truncate pr-2">Funds rate &gt; 4.25%</span>
+          <span className="font-mono text-green">YES ·.29</span>
+        </div>
+      </div>
+      <div className="mt-4 flex items-end justify-between border-t border-line pt-3">
+        <span className="text-xs font-semibold text-muted">offered</span>
+        <span className="serif text-4xl">42.1×</span>
+      </div>
+    </div>
+  );
+}
+
+function TicketCard() {
+  return (
+    <div className="soft w-[290px] rotate-3 rounded-3xl bg-dark p-5 text-white noise">
+      <p className="font-mono text-[10px] uppercase tracking-widest text-white/50">201 · ticket live</p>
+      <div className="mt-3 font-mono text-[12.5px] leading-relaxed text-white/80">
+        {`{`}
+        <br />
+        &nbsp;&nbsp;{`"ticketId": "b4093643",`}
+        <br />
+        &nbsp;&nbsp;{`"status": `}<span className="text-[#7ee2a8]">{`"live"`}</span>,
+        <br />
+        &nbsp;&nbsp;{`"multiplier": 42.1,`}
+        <br />
+        &nbsp;&nbsp;{`"potentialPayoutUsd": 210.50`}
+        <br />
+        {`}`}
+      </div>
+      <div className="mt-4 border-t border-white/15 pt-3 font-mono text-[10px] uppercase tracking-widest text-white/50">
+        paid via x402 · usdt · x layer
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- docs data ------------------------------- */
+
+const ENDPOINTS = [
+  {
+    m: "GET",
+    p: "/markets?q=",
+    d: "Unified live search across both venues.",
+    r: "{ markets: Market[] } — venue, id, question, yesPrice, noPrice",
+    cost: "free",
+  },
+  {
+    m: "POST",
+    p: "/parlay/quote",
+    d: "Price legs + stake. Order books walked for real depth.",
+    r: "Quote — fairMultiplier, offeredMultiplier, totalChargeUsd, quoteId (90s)",
+    cost: "free",
+  },
+  {
+    m: "POST",
+    p: "/parlay/place",
+    d: "No X-PAYMENT → 402 with terms. Paid retry → live ticket.",
+    r: "402: PaymentRequired · 201: { ticket: Ticket }",
+    cost: "stake + 1%",
+  },
+  {
+    m: "POST",
+    p: "/nl/quote",
+    d: "Plain English → legs via 0G Compute → deterministic quote.",
+    r: "{ interpretation, engine, legs, quote }",
+    cost: "free",
+  },
+  {
+    m: "GET",
+    p: "/parlay/:id",
+    d: "Ticket status; legs resolve from venue data automatically.",
+    r: "{ ticket: Ticket } — status: live | won | lost",
+    cost: "free",
+  },
+];
+
+const FAQS = [
+  {
+    q: "How do payments work?",
+    a: "Flip speaks x402. Call POST /parlay/place with no payment and you get HTTP 402 with exact terms: amount (stake + 1% fee) in USDT on X Layer (eip155:196), asset address, and payTo. Pay, retry with the signed X-PAYMENT header, and the facilitator-verified payment funds your ticket in the same call.",
+  },
+  {
+    q: "Where do prices come from?",
+    a: "Live order books — Polymarket's CLOB and Kalshi's public books — walked for your actual size, never midpoints. The quote shows the fair multiplier (independence product) and the offered multiplier side by side, with a published 7% edge and a 10% haircut per same-category pair.",
+  },
+  {
+    q: "How do tickets settle?",
+    a: "A watcher polls venue resolutions. Any leg lost → ticket lost. All legs won → the ticket records the payout owed to the paying address. Everything is auditable at GET /tickets.",
+  },
+  {
+    q: "What are the caps?",
+    a: "6 legs, $50 max stake, 100x max multiplier, $1,000 max payout, quotes valid 90 seconds, idempotent placement via X-IDEMPOTENCY-KEY.",
+  },
+  {
+    q: "What does the AI do — and not do?",
+    a: "POST /nl/quote uses 0G Compute (TEE-attested inference) only to map your sentence to live markets. It never prices, never places, never touches money. Pricing is deterministic and published; placement requires your payment.",
+  },
+];
 
 export default function Home() {
   return (
-    <main className="mx-auto max-w-5xl px-6">
+    <div>
       {/* nav */}
-      <nav className="flex items-center justify-between py-6">
-        <span className="text-xl font-extrabold tracking-tight">Flip</span>
-        <div className="flex items-center gap-6 text-sm text-muted">
-          <a href="#how" className="hidden hover:text-fg sm:block">
-            How it works
-          </a>
-          <a href="#pricing" className="hidden hover:text-fg sm:block">
-            Pricing
-          </a>
-          <a href="#api" className="hidden hover:text-fg sm:block">
-            API
-          </a>
-          <a
-            href="#api"
-            className="rounded-md bg-fg px-4 py-2 font-mono text-xs font-medium text-white transition-opacity hover:opacity-80"
-          >
-            curl {API.replace("https://", "")}
+      <nav className="sticky top-0 z-50 bg-bg/70 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+          <div className="flex items-center gap-10">
+            <span className="serif text-2xl font-medium italic">
+              Flip<span className="text-green">.</span>
+            </span>
+            <div className="hidden gap-8 text-[15px] font-semibold text-muted sm:flex">
+              <a href="#playground" className="hover:text-ink">Playground</a>
+              <a href="#docs" className="hover:text-ink">Docs</a>
+              <a href="#faq" className="hover:text-ink">FAQ</a>
+            </div>
+          </div>
+          <a href={`${API}/openapi.json`} className="pill text-sm">
+            OpenAPI spec
           </a>
         </div>
       </nav>
 
-      {/* hero */}
-      <header className="grid items-center gap-12 py-16 lg:grid-cols-2 lg:py-24">
-        <div>
-          <div className="rise flex flex-wrap gap-2">
-            {["x402 native", "eip155:196", "no accounts", "no API keys"].map((c) => (
-              <span
-                key={c}
-                className="rounded-full border border-line bg-gray-1 px-3 py-1 font-mono text-[11px] text-muted"
-              >
-                {c}
-              </span>
-            ))}
+      <main className="overflow-hidden rounded-b-[64px] bg-bg pb-20">
+        {/* hero */}
+        <header className="px-6 pb-16 pt-16 text-center">
+          <div className="rise mb-6">
+            <Badge>
+              <strong>Live on OKX.AI</strong> · agent-callable
+            </Badge>
           </div>
-          <h1 className="rise d1 mt-6 text-5xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl">
+          <h1 className="serif rise d1 mx-auto max-w-3xl text-6xl leading-[1.02] tracking-tight sm:text-7xl lg:text-[84px] lg:leading-[0.98]">
             One payment.
             <br />
             One position.
-            <br />
-            <span className="text-muted">Every market.</span>
           </h1>
-          <p className="rise d2 mt-6 max-w-md text-lg leading-relaxed text-muted">
-            Flip is a paid API for agents. Combine live markets from Polymarket and Kalshi into a
-            single leveraged position — quoted in seconds, funded by one USDT transfer on X Layer,
-            settled automatically.
+          <p className="rise d2 mx-auto mt-7 max-w-sm text-[19px] leading-relaxed tracking-tight text-muted">
+            Combine live Polymarket and Kalshi markets into a single ticket. Quote free. Pay one
+            HTTP&nbsp;402.
           </p>
-          <div className="rise d3 mt-8 flex gap-3">
-            <a
-              href="#how"
-              className="rounded-md bg-fg px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-80"
-            >
-              See the flow
+          <div className="rise d3 mt-9 flex justify-center gap-3">
+            <a href="#playground" className="pill">
+              <strong>Try the playground</strong>
             </a>
-            <a
-              href="#api"
-              className="rounded-md border border-line px-5 py-3 text-sm font-medium transition-colors hover:border-fg"
-            >
-              API reference
+            <a href="#docs" className="pill-light relative">
+              Read the docs
             </a>
           </div>
-        </div>
 
-        <Terminal
-          className="rise d2"
-          title="flip — live session"
-          lines={[
-            { t: "cmd", s: `curl ${API.replace("https://", "")}/markets?q=fed` },
-            { t: "out", s: `[polymarket] "No Fed change in July?"   yes 0.92` },
-            { t: "out", s: `[kalshi]     "Fed funds above 4.25%?"   yes 0.29` },
-            { t: "cmd", s: "curl -X POST /parlay/quote -d '{...2 legs, $5}'" },
-            { t: "out", s: `{` },
-            { t: "out", s: `  "quoteId": "e8accb18d4bf3d19",` },
-            { t: "out", s: `  "fairMultiplier": 45.37,` },
-            { t: "ok", s: `  "offeredMultiplier": 42.1,` },
-            { t: "ok", s: `  "potentialPayoutUsd": 210.50,` },
-            { t: "out", s: `  "totalChargeUsd": 5.10` },
-            { t: "out", s: `}` },
-          ]}
-        />
-      </header>
+          {/* floating cards over pastel portal */}
+          <div className="rise d4 relative mx-auto mt-16 flex max-w-2xl items-center justify-center">
+            <div
+              className="absolute inset-x-8 top-6 bottom-0 rounded-[48px]"
+              style={{
+                background:
+                  "radial-gradient(60% 70% at 50% 40%, #e5eff8 0%, #ebf6f2 45%, rgba(247,247,247,0) 100%)",
+              }}
+            />
+            <div className="relative z-10 flex flex-wrap items-center justify-center gap-6 py-10">
+              <QuoteCard />
+              <TicketCard />
+            </div>
+          </div>
 
-      {/* venue logos */}
-      <section className="border-y border-line py-8">
-        <div className="flex flex-wrap items-center justify-center gap-10">
-          <span className="font-mono text-[11px] uppercase tracking-widest text-faint">
-            Live markets from
-          </span>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={LOGO_POLYMARKET} alt="Polymarket" className="h-6 w-auto opacity-80" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={LOGO_KALSHI} alt="Kalshi" className="h-6 w-auto opacity-80" />
-          <span className="font-mono text-[11px] uppercase tracking-widest text-faint">
-            · payments on X Layer · listed on OKX.AI
-          </span>
-        </div>
-      </section>
+          {/* venues */}
+          <div className="mt-12 flex flex-wrap items-center justify-center gap-8 opacity-80">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-muted">
+              live markets from
+            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={LOGO_POLYMARKET} alt="Polymarket" className="h-5 w-auto" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={LOGO_KALSHI} alt="Kalshi" className="h-5 w-auto" />
+            <span className="font-mono text-[11px] uppercase tracking-widest text-muted">
+              · payments on x layer
+            </span>
+          </div>
+        </header>
 
-      {/* how it works */}
-      <section id="how" className="py-24">
-        <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-          The 402 is the whole checkout
-        </h2>
-        <p className="mt-3 max-w-xl text-muted">
-          No signup, no session, no key exchange. Ask for a ticket, get payment terms, pay on
-          X Layer, hold the position. Every response below was captured from the running service —
-          this is the actual wire.
-        </p>
-
-        <div className="mt-10 space-y-6">
-          <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-            <div>
-              <p className="font-mono text-xs text-faint">STEP 1 — FREE</p>
-              <h3 className="mt-1 font-semibold">Quote the combination</h3>
-              <p className="mt-1 text-sm text-muted">
-                Any legs, any venue mix. Prices come from walking the live order books, not
-                midpoints.
+        {/* pastel tiles */}
+        <section className="px-6 py-16">
+          <div className="mx-auto grid max-w-6xl gap-7 md:grid-cols-3">
+            <div className="noise rounded-2xl bg-mint px-6 py-12 text-center">
+              <div className="soft mx-auto flex h-[202px] w-[202px] flex-col items-center justify-center rounded-2xl bg-card">
+                <span className="text-sm font-semibold text-muted">offered vs fair</span>
+                <span className="serif mt-2 text-6xl">42.1×</span>
+                <span className="mt-2 rounded-md bg-bg px-3 py-1 font-mono text-xs">fair 45.37×</span>
+              </div>
+              <h3 className="serif mt-10 text-3xl">No hidden edge</h3>
+              <p className="mx-auto mt-3 max-w-[260px] text-[17px] leading-snug tracking-tight text-muted">
+                Both multipliers on every quote. The 7% is printed, not buried.
               </p>
             </div>
-            <Terminal
-              title="POST /parlay/quote"
-              lines={[
-                {
-                  t: "cmd",
-                  s: `curl -X POST ${API.replace("https://", "")}/parlay/quote -d '{"stakeUsd":5,"legs":[…]}'`,
-                },
-                { t: "out", s: `{` },
-                { t: "out", s: `  "quoteId": "e8accb18d4bf3d19",  "validForSeconds": 90,` },
-                { t: "out", s: `  "legs": [` },
-                { t: "out", s: `    { "venue": "polymarket", "side": "no",  "price": 0.076 },` },
-                { t: "out", s: `    { "venue": "kalshi",     "side": "yes", "price": 0.290 }` },
-                { t: "out", s: `  ],` },
-                { t: "out", s: `  "fairMultiplier": 45.37,` },
-                { t: "ok", s: `  "offeredMultiplier": 42.1,` },
-                { t: "out", s: `  "totalChargeUsd": 5.10` },
-                { t: "out", s: `}` },
-              ]}
-            />
-          </div>
 
-          <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-            <div>
-              <p className="font-mono text-xs text-faint">STEP 2 — HTTP 402</p>
-              <h3 className="mt-1 font-semibold">Get payment terms</h3>
-              <p className="mt-1 text-sm text-muted">
-                The stake rides inside the payment: $5 position + $0.10 fee = one transfer of
-                5.10 USDT.
+            <div className="noise rounded-2xl bg-blu px-6 py-12 text-center">
+              <div className="soft mx-auto flex h-[202px] w-[202px] flex-col items-center justify-center rounded-2xl bg-card font-mono">
+                <span className="text-xs text-muted">HTTP</span>
+                <span className="serif mt-1 text-7xl">402</span>
+                <span className="mt-2 rounded-md bg-bg px-3 py-1 text-xs">= the checkout</span>
+              </div>
+              <h3 className="serif mt-10 text-3xl">The payment is the stake</h3>
+              <p className="mx-auto mt-3 max-w-[260px] text-[17px] leading-snug tracking-tight text-muted">
+                One USDT transfer funds the position and the fee. No accounts, no keys.
               </p>
             </div>
-            <Terminal
-              title="POST /parlay/place → 402"
-              lines={[
-                { t: "cmd", s: `curl -X POST /parlay/place -d '{"quoteId":"e8accb18d4bf3d19"}'` },
-                { t: "warn", s: `HTTP/1.1 402 Payment Required` },
-                { t: "out", s: `{` },
-                { t: "out", s: `  "accepts": [{` },
-                { t: "out", s: `    "scheme": "exact",` },
-                { t: "out", s: `    "network": "eip155:196",` },
-                { t: "out", s: `    "maxAmountRequired": "5100000",` },
-                { t: "out", s: `    "asset": "0x1E4a…D41d",   // USDT on X Layer` },
-                { t: "out", s: `    "payTo": "0x19d3…9375"` },
-                { t: "out", s: `  }]` },
-                { t: "out", s: `}` },
-              ]}
-            />
-          </div>
 
-          <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-            <div>
-              <p className="font-mono text-xs text-faint">STEP 3 — 201</p>
-              <h3 className="mt-1 font-semibold">Hold the ticket</h3>
-              <p className="mt-1 text-sm text-muted">
-                A watcher polls venue resolutions. All legs win → payout owed to the paying
-                address. Any leg loses → done.
+            <div className="noise rounded-2xl bg-lilac px-6 py-12 text-center">
+              <div className="soft mx-auto flex h-[202px] w-[202px] flex-col items-center justify-center rounded-2xl bg-card">
+                <span className="text-sm font-semibold text-muted">settles</span>
+                <span className="serif mt-2 text-5xl italic">itself</span>
+                <span className="mt-3 rounded-md bg-bg px-3 py-1 font-mono text-xs">live → won | lost</span>
+              </div>
+              <h3 className="serif mt-10 text-3xl">Autonomous end to end</h3>
+              <p className="mx-auto mt-3 max-w-[260px] text-[17px] leading-snug tracking-tight text-muted">
+                A watcher resolves every leg from venue data. Audit trail included.
               </p>
             </div>
-            <Terminal
-              title="POST /parlay/place + X-PAYMENT → 201"
-              lines={[
-                { t: "cmd", s: `curl -X POST /parlay/place -H "X-PAYMENT: $SIGNED" -d '{"quoteId":"…"}'` },
-                { t: "ok", s: `HTTP/1.1 201 Created` },
-                { t: "out", s: `{` },
-                { t: "out", s: `  "ticket": {` },
-                { t: "out", s: `    "ticketId": "b4093643",` },
-                { t: "ok", s: `    "status": "live",` },
-                { t: "out", s: `    "multiplier": 42.1,` },
-                { t: "out", s: `    "stakeUsd": 5,` },
-                { t: "out", s: `    "potentialPayoutUsd": 210.50` },
-                { t: "out", s: `  }` },
-                { t: "out", s: `}` },
-              ]}
-            />
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* pricing */}
-      <section id="pricing" className="border-t border-line py-24">
-        <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-          The math is public
-        </h2>
-        <div className="mt-10 grid gap-10 lg:grid-cols-2">
-          <div className="rounded-lg border border-line bg-gray-1 p-6">
-            <pre className="overflow-x-auto font-mono text-[13px] leading-[2]">
-{`fair     = Π 1/price_i        // live order books
-haircut  = 0.9 ^ correlated_pairs
-offered  = fair × haircut × 0.93
-fee      = max($0.10, 1% of stake)`}
-            </pre>
+        {/* playground */}
+        <section id="playground" className="px-6 py-16">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-12 text-center">
+              <Badge>Powered by 0G Compute · TEE-attested</Badge>
+              <h2 className="serif mx-auto mt-6 max-w-xl text-5xl leading-[1.02] tracking-tight sm:text-[58px]">
+                Say it. <em className="italic">Quote it.</em>
+              </h2>
+              <p className="mx-auto mt-5 max-w-md text-[19px] tracking-tight text-muted">
+                Describe a view in plain English — 0G maps it to live markets, the deterministic
+                engine prices it. Or send raw JSON.
+              </p>
+            </div>
+            <Playground api={API} />
           </div>
-          <div className="space-y-5 text-[15px] leading-relaxed text-muted">
-            <p>
-              <strong className="text-fg">Fair and offered, side by side.</strong> Every quote
-              shows the independence-product multiplier and what we offer after the published 7%
-              edge. Nothing is buried in the price.
-            </p>
-            <p>
-              <strong className="text-fg">Correlated legs get trimmed.</strong> Legs in the same
-              category cut the multiplier 10% per pair; duplicate markets are rejected.
-            </p>
-            <p>
-              <strong className="text-fg">Hard caps, printed.</strong>{" "}
-              <span className="tabular font-mono text-sm">
-                6 legs · $50 max stake · 100x max · $1,000 max payout
-              </span>
-              . Quotes hold for 90 seconds; retries are idempotent.
-            </p>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      {/* api reference */}
-      <section id="api" className="border-t border-line py-24">
-        <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">API</h2>
-        <p className="mt-3 text-muted">
-          Machine-readable manifest at{" "}
-          <a href={API} className="font-mono text-sm text-blue hover:underline">
-            GET /
-          </a>
-          . No authentication for reads; paid routes speak x402.
-        </p>
-        <div className="mt-8 overflow-x-auto rounded-lg border border-line">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-line bg-gray-1 font-mono text-[11px] uppercase tracking-wider text-faint">
-                <th className="px-4 py-3">Method</th>
-                <th className="px-4 py-3">Path</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3 text-right">Cost</th>
-              </tr>
-            </thead>
-            <tbody className="font-mono text-[13px]">
-              {[
-                ["GET", "/markets?q=", "unified live search across Polymarket + Kalshi", "free"],
-                ["POST", "/parlay/quote", "price legs + stake → multiplier, quoteId (90s)", "free"],
-                ["POST", "/parlay/place", "x402 → live ticket; payment = stake + fee", "stake + 1%"],
-                ["GET", "/parlay/:id", "ticket status, leg-by-leg resolution", "free"],
-                ["GET", "/tickets", "recent tickets (audit trail)", "free"],
-                ["GET", "/health", "liveness", "free"],
-              ].map(([m, p, d, c]) => (
-                <tr key={p} className="border-b border-line last:border-b-0">
-                  <td className={`px-4 py-3 font-semibold ${m === "POST" ? "text-amber" : "text-green"}`}>
-                    {m}
-                  </td>
-                  <td className="px-4 py-3">{p}</td>
-                  <td className="px-4 py-3 font-sans text-muted">{d}</td>
-                  <td className={`px-4 py-3 text-right ${c === "free" ? "text-faint" : "font-semibold text-fg"}`}>
-                    {c}
-                  </td>
-                </tr>
+        {/* docs */}
+        <section id="docs" className="px-6 py-16">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-12 text-center">
+              <h2 className="serif text-5xl tracking-tight sm:text-[58px]">The API</h2>
+              <p className="mx-auto mt-4 max-w-md text-[19px] tracking-tight text-muted">
+                Six endpoints, one paid. Full schemas in the{" "}
+                <a className="font-semibold text-ink underline" href={`${API}/openapi.json`}>
+                  OpenAPI spec
+                </a>
+                .
+              </p>
+            </div>
+            <div className="space-y-3">
+              {ENDPOINTS.map((e) => (
+                <div key={e.p} className="soft flex flex-col gap-3 rounded-2xl bg-card px-6 py-5 md:flex-row md:items-center">
+                  <div className="flex w-64 shrink-0 items-center gap-3">
+                    <span
+                      className={`rounded-md px-2 py-1 font-mono text-[11px] font-bold ${
+                        e.m === "POST" ? "bg-lilac" : "bg-mint"
+                      }`}
+                    >
+                      {e.m}
+                    </span>
+                    <span className="font-mono text-[14px] font-semibold">{e.p}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[15px] font-medium">{e.d}</p>
+                    <p className="mt-0.5 truncate font-mono text-[12px] text-muted">{e.r}</p>
+                  </div>
+                  <span
+                    className={`shrink-0 font-mono text-xs ${
+                      e.cost === "free" ? "text-muted" : "rounded-full bg-peach px-3 py-1 font-bold"
+                    }`}
+                    style={e.cost !== "free" ? { background: "var(--peach)" } : undefined}
+                  >
+                    {e.cost}
+                  </span>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </div>
 
-      {/* footer */}
-      <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-line py-10 text-sm text-faint">
-        <span className="font-extrabold text-fg">Flip</span>
-        <span className="font-mono text-xs">
-          markets: Polymarket · Kalshi &nbsp;·&nbsp; payments: USDT on X Layer &nbsp;·&nbsp; © 2026
-        </span>
+            <div className="term mt-8 overflow-x-auto p-6">
+              <span className="text-white/40"># the whole lifecycle, three calls</span>
+              {"\n"}$ curl {API.replace("https://", "")}/markets?q=fed
+              {"\n"}$ curl -X POST /parlay/quote -d {`'{"stakeUsd":5,"legs":[…]}'`}{" "}
+              <span className="text-white/40">→ quoteId, 42.1×</span>
+              {"\n"}$ curl -X POST /parlay/place -H {`"X-PAYMENT: $SIGNED"`} -d{" "}
+              {`'{"quoteId":"…"}'`} <span className="text-[#7ee2a8]">→ 201 ticket live</span>
+            </div>
+          </div>
+        </section>
+
+        {/* faq */}
+        <section id="faq" className="px-6 py-16">
+          <div className="mx-auto max-w-2xl">
+            <div className="mb-10 text-center">
+              <Badge>FAQs</Badge>
+              <h2 className="serif mt-6 text-5xl leading-tight tracking-tight sm:text-[58px]">
+                Got questions? <br /> Here&rsquo;s the answers.
+              </h2>
+            </div>
+            <div className="space-y-3">
+              {FAQS.map((f) => (
+                <details key={f.q} className="rounded-2xl bg-card">
+                  <summary className="serif flex items-center justify-between gap-6 px-6 py-6 text-[22px] tracking-tight">
+                    {f.q}
+                    <svg className="chev shrink-0" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                      <path
+                        fillRule="evenodd"
+                        clipRule="evenodd"
+                        d="M10 .83a9.17 9.17 0 110 18.34A9.17 9.17 0 0110 .83zm3.33 6.74l1.18 1.18L10 13.26 5.49 8.75l1.18-1.18L10 10.9l3.33-3.33z"
+                        fill="#e5e5e5"
+                      />
+                    </svg>
+                  </summary>
+                  <p className="px-6 pb-6 text-[15.5px] leading-relaxed tracking-tight text-muted">
+                    {f.a}
+                  </p>
+                </details>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* dark pricing panel */}
+        <section className="px-6 py-16">
+          <div className="mx-auto grid max-w-6xl overflow-hidden rounded-[32px] md:grid-cols-[1fr_1.2fr]">
+            <div
+              className="noise px-10 py-14"
+              style={{ background: "linear-gradient(135deg, #dae8f5 34%, #a3c6e6)" }}
+            >
+              <h3 className="serif max-w-[280px] text-[40px] leading-[1.05] tracking-tight">
+                Integrated in 5 minutes
+              </h3>
+              <ul className="mt-6 max-w-[290px] space-y-1.5">
+                {["GET /markets — pick your legs", "POST /parlay/quote — free", "Pay the 402 — you're in"].map(
+                  (s, i) => (
+                    <li key={s} className="flex items-center rounded-xl bg-white/40 p-3 font-semibold">
+                      <span className="serif mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/50 text-lg">
+                        {i + 1}
+                      </span>
+                      <span className="text-[14.5px]">{s}</span>
+                    </li>
+                  )
+                )}
+              </ul>
+            </div>
+            <div className="noise flex flex-col items-end bg-dark px-10 py-14 text-right text-white">
+              <h3 className="serif text-[40px] leading-tight tracking-tight">One fee,</h3>
+              <div className="serif mt-4 text-[88px] leading-none">1%</div>
+              <div className="mt-2 font-semibold">per placed ticket · quotes always free</div>
+              <a
+                href="#playground"
+                className="mt-10 rounded-full bg-white px-8 py-3 font-bold text-ink transition-transform hover:-translate-y-0.5"
+              >
+                Start building
+              </a>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* dark footer */}
+      <footer className="noise -mt-16 bg-gradient-to-b from-dark to-[#1b1b1b] pt-32 text-white">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="mb-16 grid gap-10 sm:grid-cols-3">
+            <div>
+              <div className="mb-4 font-semibold">The Good</div>
+              {[
+                ["Playground", "#playground"],
+                ["Docs", "#docs"],
+                ["OpenAPI spec", `${API}/openapi.json`],
+              ].map(([t, h]) => (
+                <a key={t} href={h} className="mb-3 block text-lg text-white/50 hover:text-white">
+                  {t}
+                </a>
+              ))}
+            </div>
+            <div>
+              <div className="mb-4 font-semibold">The Boring</div>
+              {[
+                ["GitHub", "https://github.com/emmanuel39hanks/onflip"],
+                ["Status", `${API}/health`],
+                ["Audit trail", `${API}/tickets`],
+              ].map(([t, h]) => (
+                <a key={t} href={h} className="mb-3 block text-lg text-white/50 hover:text-white">
+                  {t}
+                </a>
+              ))}
+            </div>
+            <div>
+              <div className="mb-4 font-semibold">The Cool</div>
+              <p className="text-lg leading-relaxed text-white/50">
+                Markets from Polymarket &amp; Kalshi.
+                <br />
+                Payments in USDT on X Layer.
+                <br />
+                NL parsing on 0G Compute.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="serif select-none overflow-hidden text-center text-[26vw] italic leading-[0.72] tracking-tight text-white">
+          Flip
+        </div>
       </footer>
-    </main>
+    </div>
   );
 }
