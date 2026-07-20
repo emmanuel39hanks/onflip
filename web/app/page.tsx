@@ -234,7 +234,7 @@ export default function Home() {
             <div className="noise rounded-2xl bg-lilac px-6 py-12 text-center">
               <div className="soft mx-auto flex h-[202px] w-[202px] flex-col items-center justify-center rounded-2xl bg-card">
                 <span className="text-sm font-semibold text-muted">settles</span>
-                <span className="serif mt-2 text-5xl italic">itself</span>
+                <span className="serif mt-2 text-5xl">itself</span>
                 <span className="mt-3 rounded-md bg-bg px-3 py-1 font-mono text-xs">live → won | lost</span>
               </div>
               <h3 className="serif mt-10 text-3xl">Autonomous end to end</h3>
@@ -251,7 +251,7 @@ export default function Home() {
             <div className="mb-12 text-center">
               <Badge>Powered by 0G Compute · TEE-attested</Badge>
               <h2 className="serif mx-auto mt-6 max-w-xl text-5xl leading-[1.02] tracking-tight sm:text-[58px]">
-                Say it. <em className="italic">Quote it.</em>
+                Say it. <span className="serif">Quote it.</span>
               </h2>
               <p className="mx-auto mt-5 max-w-md text-[19px] tracking-tight text-muted">
                 Describe a view in plain English — 0G maps it to live markets, the deterministic

@@ -41,7 +41,8 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-.serif { font-family: var(--font-serif); font-weight: 400; }
+.serif { font-family: var(--font-serif); font-weight: 400; font-style: normal; }
+.serif em, .serif i, em, i { font-style: normal; }
 .tabular { font-variant-numeric: tabular-nums; }
 
 /* Popcorn conic pastel glow */
@@ -58,8 +59,8 @@ body {
   );
 }
 
-/* soft card shadow */
-.soft { box-shadow: rgba(0, 0, 0, 0.05) 0px 4px 20px 0px; }
+/* flat cards — hairline border, no shadow */
+.soft { border: 1px solid var(--line); }
 
 /* noise overlay for pastel tiles + dark panels */
 .noise {

@@ -1,0 +1,19 @@
+# Flip — landing site (Next.js standalone). Built from repo root context;
+# RAILWAY_DOCKERFILE_PATH=web.Dockerfile selects this for the web service.
+FROM node:22-slim AS build
+WORKDIR /app
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY web/ .
+RUN pnpm build
+
+FROM node:22-slim AS run
+WORKDIR /app
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+# Next standalone does NOT bundle public/ — without this every /logos/* 404s.
+COPY --from=build /app/public ./public
+EXPOSE 3000
+CMD ["node", "server.js"]
