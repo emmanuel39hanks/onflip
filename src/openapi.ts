@@ -32,6 +32,7 @@ const Quote = {
   properties: {
     quoteId: { type: "string" },
     validForSeconds: { type: "integer" },
+    type: { type: "string", enum: ["single", "parlay"] },
     legs: {
       type: "array",
       items: {
@@ -47,18 +48,21 @@ const Quote = {
     },
     fairMultiplier: { type: "number", description: "Π 1/price — independence product" },
     correlationHaircut: { type: "number" },
-    offeredMultiplier: { type: "number", description: "fair × haircut × (1 − 7% edge)" },
+    offeredMultiplier: { type: "number", description: "fair × haircut × (1 − edge)" },
     stakeUsd: { type: "number" },
     potentialPayoutUsd: { type: "number" },
-    serviceFeeUsd: { type: "number" },
-    totalChargeUsd: { type: "number", description: "stake + fee — the x402 amount" },
+    executable: {
+      type: "array",
+      items: { type: "string" },
+      description: "condition ids that can be routed (Polymarket only)",
+    },
     warnings: { type: "array", items: { type: "string" } },
   },
 } as const;
 
 const PaymentRequired = {
   type: "object",
-  description: "x402 payment terms (HTTP 402 body)",
+  description: "x402 payment terms for the routing fee (HTTP 402 body)",
   properties: {
     x402Version: { type: "integer" },
     error: { type: "string" },
@@ -81,71 +85,160 @@ const PaymentRequired = {
   },
 } as const;
 
-const Ticket = {
+const Route = {
   type: "object",
+  description:
+    "A ready-to-sign Polymarket order. `order` carries no signature and authorises nothing " +
+    "until you sign `typedData` with your own key.",
   properties: {
-    ticketId: { type: "string" },
-    createdAt: { type: "string" },
-    status: { type: "string", enum: ["live", "won", "lost"] },
-    stakeUsd: { type: "number" },
-    multiplier: { type: "number" },
-    potentialPayoutUsd: { type: "number" },
-    legs: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          venue: { type: "string" },
-          id: { type: "string" },
-          side: { type: "string" },
-          question: { type: "string" },
-          lockedPrice: { type: "number" },
-          result: { type: "string", enum: ["pending", "won", "lost"] },
-        },
+    routeId: { type: "string" },
+    validForSeconds: { type: "integer", description: "routes are valid for 10 minutes" },
+    market: {
+      type: "object",
+      properties: {
+        conditionId: { type: "string" },
+        question: { type: "string" },
+        tokenId: { type: "string" },
+        outcome: { type: "string", enum: ["yes", "no"] },
+        tickSize: { type: "string" },
+        negRisk: { type: "boolean" },
       },
     },
-    payer: { type: "string", nullable: true },
-    paymentTxHash: { type: "string", nullable: true },
-    settledAt: { type: "string", nullable: true },
+    cost: {
+      type: "object",
+      properties: {
+        shares: { type: "number" },
+        pricePerShare: { type: "number" },
+        totalUsdc: { type: "number", description: "paid from YOUR wallet, direct to Polymarket" },
+      },
+    },
+    builderFee: {
+      type: "object",
+      description: "What Flip earns on the trade itself. Disclosed before you sign.",
+      properties: {
+        takerBps: { type: "integer" },
+        makerBps: { type: "integer" },
+        estimatedUsdc: { type: "number" },
+        note: { type: "string" },
+      },
+    },
+    order: { type: "object", description: "unsigned order — no `signature` field" },
+    typedData: {
+      type: "object",
+      description: "EIP-712 payload to sign locally",
+      properties: {
+        domain: { type: "object" },
+        types: { type: "object" },
+        primaryType: { type: "string" },
+        message: { type: "object" },
+      },
+    },
+    postItYourself: {
+      type: "object",
+      description: "the raw HTTP call, if you would rather not use /submit",
+    },
+    custody: { type: "string" },
+    builderCode: { type: "string" },
   },
 } as const;
 
-export function buildOpenApi(serverUrl: string) {
+const Position = {
+  type: "object",
+  properties: {
+    conditionId: { type: "string" },
+    question: { type: "string" },
+    outcome: { type: "string" },
+    size: { type: "number" },
+    avgPrice: { type: "number" },
+    currentValue: { type: "number" },
+    pnlUsdc: { type: "number" },
+    redeemable: { type: "boolean" },
+  },
+} as const;
+
+const Err = {
+  type: "object",
+  properties: { error: { type: "string" } },
+} as const;
+
+export function buildOpenApi(baseUrl: string) {
   return {
     openapi: "3.1.0",
     info: {
-      title: "Flip API",
-      version: "0.1.0",
+      title: "Flip — execution router for prediction markets",
+      version: "2.0.0",
       description:
-        "Combine live Polymarket and Kalshi markets into one position. " +
-        "Reads are free; `POST /parlay/place` is paid via x402 — the payment " +
-        "carries the stake (USDT on X Layer, eip155:196).",
+        "Flip turns an agent's view into a real prediction-market position. It searches " +
+        "Polymarket and Kalshi, prices against live order books, and builds a ready-to-sign " +
+        "Polymarket order.\n\n" +
+        "**You keep custody throughout.** Flip holds no private key: it builds the order, you " +
+        "sign it, and the position lands in your own wallet. Flip's only revenue is a flat " +
+        "routing fee ($0.02 in USDT on X Layer, via x402) and a builder fee of 0 bps.\n\n" +
+        "Search, quoting and position tracking are free. Only `POST /execute` is paid.",
+      contact: { name: "Flip", url: "https://onflip.xyz" },
     },
-    servers: [{ url: serverUrl }],
+    servers: [{ url: baseUrl }],
+    tags: [
+      { name: "Discovery", description: "Find and price markets. Free." },
+      { name: "Execution", description: "Build, sign and submit orders." },
+      { name: "Portfolio", description: "Track what you hold." },
+    ],
     paths: {
+      "/": {
+        get: {
+          tags: ["Discovery"],
+          summary: "Service manifest",
+          description: "Machine-readable description of the service, its endpoints and its custody model.",
+          responses: { "200": { description: "Manifest" } },
+        },
+      },
       "/markets": {
         get: {
-          summary: "Search live markets across both venues",
+          tags: ["Discovery"],
+          summary: "Search live markets (free)",
+          description: "Unified search across Polymarket and Kalshi.",
           parameters: [
-            { name: "q", in: "query", schema: { type: "string" }, description: "text filter" },
-            { name: "venue", in: "query", schema: { type: "string", enum: ["polymarket", "kalshi"] } },
-            { name: "limit", in: "query", schema: { type: "integer", default: 10, maximum: 25 } },
+            {
+              name: "q",
+              in: "query",
+              schema: { type: "string" },
+              example: "fed",
+              description: "search text",
+            },
+            {
+              name: "venue",
+              in: "query",
+              schema: { type: "string", enum: ["polymarket", "kalshi"] },
+              description: "restrict to one venue",
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", default: 10, maximum: 25 },
+            },
           ],
           responses: {
             "200": {
-              description: "Unified market list",
+              description: "Matching markets",
               content: {
                 "application/json": {
-                  schema: { type: "object", properties: { markets: { type: "array", items: Market } } },
+                  schema: {
+                    type: "object",
+                    properties: { markets: { type: "array", items: Market } },
+                  },
                 },
               },
             },
           },
         },
       },
-      "/parlay/quote": {
+      "/quote": {
         post: {
-          summary: "Price a parlay (free)",
+          tags: ["Discovery"],
+          summary: "Price a view (free)",
+          description:
+            "Walks the real order book for your size — never midpoints. One leg prices a single " +
+            "position; 2-6 legs return the combined multiplier for a sequential plan.",
           requestBody: {
             required: true,
             content: {
@@ -154,132 +247,193 @@ export function buildOpenApi(serverUrl: string) {
                   type: "object",
                   required: ["legs"],
                   properties: {
-                    legs: { type: "array", items: LegRequest, minItems: 2, maxItems: 6 },
-                    stakeUsd: { type: "number", default: 5, maximum: 50 },
+                    legs: { type: "array", items: LegRequest, minItems: 1, maxItems: 6 },
+                    stakeUsd: { type: "number", default: 5 },
                   },
                 },
                 example: {
                   stakeUsd: 5,
-                  legs: [
-                    { venue: "polymarket", id: "0x8bf1c1536ecb…", side: "no" },
-                    { venue: "kalshi", id: "KXFED-27APR-T4.25", side: "yes" },
-                  ],
+                  legs: [{ venue: "polymarket", id: "0x8bf1…", side: "yes" }],
                 },
               },
             },
           },
           responses: {
             "200": {
-              description: "Quote, valid 90 seconds",
-              content: {
-                "application/json": {
-                  schema: Quote,
-                  example: {
-                    quoteId: "e8accb18d4bf3d19",
-                    validForSeconds: 90,
-                    fairMultiplier: 45.37,
-                    offeredMultiplier: 42.1,
-                    stakeUsd: 5,
-                    potentialPayoutUsd: 210.5,
-                    serviceFeeUsd: 0.1,
-                    totalChargeUsd: 5.1,
-                  },
-                },
-              },
+              description: "Quote",
+              content: { "application/json": { schema: Quote } },
             },
-            "400": { description: "Pricing error (bad legs, caps, no depth)" },
-          },
-        },
-      },
-      "/parlay/place": {
-        post: {
-          summary: "Place a ticket (x402-paid — the payment is the stake)",
-          description:
-            "Without `X-PAYMENT`: responds 402 with payment terms. Pay " +
-            "`totalChargeUsd` in USDT on X Layer, retry with the signed " +
-            "`X-PAYMENT` header, receive the live ticket.",
-          parameters: [
-            { name: "X-PAYMENT", in: "header", schema: { type: "string" }, description: "base64 x402 payment payload" },
-            { name: "X-IDEMPOTENCY-KEY", in: "header", schema: { type: "string" } },
-          ],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: { type: "object", required: ["quoteId"], properties: { quoteId: { type: "string" } } },
-              },
-            },
-          },
-          responses: {
-            "201": {
-              description: "Ticket live",
-              content: { "application/json": { schema: { type: "object", properties: { ticket: Ticket } } } },
-            },
-            "402": {
-              description: "Payment required — x402 terms",
-              content: {
-                "application/json": {
-                  schema: PaymentRequired,
-                  example: {
-                    x402Version: 1,
-                    accepts: [{ scheme: "exact", network: "eip155:196", maxAmountRequired: "5100000", asset: "0x1E4a5963aBFD975d8c9021cE480b42188849D41d", payTo: "0x19d3…9375" }],
-                  },
-                },
-              },
-            },
-            "410": { description: "Quote expired" },
-          },
-        },
-      },
-      "/parlay/{ticketId}": {
-        get: {
-          summary: "Ticket status",
-          parameters: [{ name: "ticketId", in: "path", required: true, schema: { type: "string" } }],
-          responses: {
-            "200": { description: "Ticket", content: { "application/json": { schema: { type: "object", properties: { ticket: Ticket } } } } },
-            "404": { description: "Not found" },
+            "400": { description: "Bad request", content: { "application/json": { schema: Err } } },
+            "429": { description: "Rate limited", content: { "application/json": { schema: Err } } },
           },
         },
       },
       "/nl/quote": {
         post: {
-          summary: "Natural language → quoted parlay (0G-powered)",
+          tags: ["Discovery"],
+          summary: "Natural language → quote (free)",
           description:
-            "Describe a view in plain English; 0G Compute (TEE-attested " +
-            "inference) maps it to live markets, then the deterministic " +
-            "engine prices it. The model suggests; it never prices or places.",
+            "Maps a sentence to live markets using 0G Compute (TEE-attested inference), then " +
+            "prices it deterministically. The model only selects from real markets we supply — " +
+            "it never prices, signs, or touches money.",
           requestBody: {
             required: true,
             content: {
               "application/json": {
-                schema: { type: "object", required: ["text"], properties: { text: { type: "string" } } },
-                example: { text: "$5 says the Fed holds in July and BTC clears 130k" },
+                schema: {
+                  type: "object",
+                  required: ["text"],
+                  properties: { text: { type: "string", maxLength: 400 } },
+                },
+                example: { text: "$5 says the Fed holds rates in July" },
               },
             },
           },
           responses: {
-            "200": {
-              description: "Interpretation + live quote",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      interpretation: { type: "string" },
-                      engine: { type: "string", enum: ["0g", "fallback"] },
-                      legs: { type: "array", items: LegRequest },
-                      quote: Quote,
+            "200": { description: "Interpretation + quote" },
+            "422": {
+              description: "Could not map to a live market",
+              content: { "application/json": { schema: Err } },
+            },
+            "429": { description: "Rate limited (5/min)", content: { "application/json": { schema: Err } } },
+          },
+        },
+      },
+      "/execute": {
+        post: {
+          tags: ["Execution"],
+          summary: "Build a ready-to-sign order (x402 — $0.02)",
+          description:
+            "Returns an unsigned Polymarket order plus the exact EIP-712 payload to sign with " +
+            "your own key. Without an `X-PAYMENT` header this returns HTTP 402 with the fee " +
+            "terms; retry with the header to receive the order.\n\n" +
+            "The returned order carries no signature and authorises nothing until you sign it. " +
+            "A `postItYourself` block is included so you can bypass `/submit` entirely.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["conditionId", "side", "price", "size", "signerAddress"],
+                  properties: {
+                    conditionId: { type: "string", description: "Polymarket condition id" },
+                    side: { type: "string", enum: ["yes", "no"] },
+                    price: { type: "number", description: "limit price per share, 0..1, snapped to tick size" },
+                    size: { type: "number", description: "number of shares; cost = size × price" },
+                    signerAddress: { type: "string", description: "your wallet — signs and receives the position" },
+                    funderAddress: { type: "string", description: "your Polymarket proxy, if different" },
+                    signatureType: {
+                      type: "integer",
+                      enum: [0, 1, 2, 3],
+                      description: "0 = EOA, 1 = Magic/email proxy, 2 = Gnosis Safe, 3 = EIP-1271",
+                    },
+                  },
+                },
+                example: {
+                  conditionId: "0x8bf1…",
+                  side: "yes",
+                  price: 0.42,
+                  size: 10,
+                  signerAddress: "0xYourWallet",
+                  funderAddress: "0xYourPolymarketProxy",
+                  signatureType: 2,
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Signable order", content: { "application/json": { schema: Route } } },
+            "402": {
+              description: "Routing fee required",
+              content: { "application/json": { schema: PaymentRequired } },
+            },
+            "422": {
+              description: "Venue rejected — closed market, insufficient depth, or unfunded wallet",
+              content: { "application/json": { schema: Err } },
+            },
+          },
+        },
+      },
+      "/submit": {
+        post: {
+          tags: ["Execution"],
+          summary: "Relay your signed order (free)",
+          description:
+            "Attaches your signature to the order from `/execute` and posts it to Polymarket. " +
+            "`creds` are your own Polymarket L2 API credentials, derived from your key with " +
+            "`createOrDeriveApiKey()`. They can post and cancel orders — they cannot sign new " +
+            "orders or withdraw funds. Optional: use `postItYourself` from `/execute` instead.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["routeId", "signature", "creds"],
+                  properties: {
+                    routeId: { type: "string" },
+                    signature: { type: "string", description: "0x-prefixed 65-byte signature" },
+                    creds: {
+                      type: "object",
+                      properties: {
+                        apiKey: { type: "string" },
+                        secret: { type: "string" },
+                        passphrase: { type: "string" },
+                      },
                     },
                   },
                 },
               },
             },
-            "422": { description: "Could not map the text to at least 2 markets" },
+          },
+          responses: {
+            "201": { description: "Submitted" },
+            "400": { description: "Unknown routeId or missing signature", content: { "application/json": { schema: Err } } },
+            "410": { description: "Route expired", content: { "application/json": { schema: Err } } },
+            "422": { description: "Exchange rejected the order", content: { "application/json": { schema: Err } } },
           },
         },
       },
-      "/tickets": { get: { summary: "Recent tickets (audit trail)", responses: { "200": { description: "List" } } } },
-      "/health": { get: { summary: "Liveness", responses: { "200": { description: "ok" } } } },
+      "/positions/{wallet}": {
+        get: {
+          tags: ["Portfolio"],
+          summary: "Live positions (free)",
+          description: "Current holdings, mark value and PnL for any wallet.",
+          parameters: [
+            {
+              name: "wallet",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+              example: "0x19d368e389fe491a578adbfb08f353780d239375",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Positions",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      wallet: { type: "string" },
+                      positions: { type: "array", items: Position },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/health": {
+        get: {
+          tags: ["Discovery"],
+          summary: "Liveness",
+          responses: { "200": { description: "ok" } },
+        },
+      },
     },
   };
 }

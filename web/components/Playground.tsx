@@ -4,16 +4,16 @@ import { useMemo, useState } from "react";
 
 const ENDPOINTS: Record<string, { body: string; hint: string }> = {
   "/nl/quote": {
-    body: `{\n  "text": "$5 says the Fed holds rates in July and bitcoin keeps climbing"\n}`,
-    hint: "plain English → legs via 0G Compute → deterministic quote",
+    body: `{\n  "text": "$5 says the Fed holds rates in July"\n}`,
+    hint: "plain English → live markets via 0G Compute → deterministic quote",
   },
-  "/parlay/quote": {
-    body: `{\n  "stakeUsd": 5,\n  "legs": [\n    { "venue": "polymarket", "id": "PASTE_CONDITION_ID", "side": "no" },\n    { "venue": "kalshi", "id": "KXFED-27APR-T4.25", "side": "yes" }\n  ]\n}`,
-    hint: "legs + stake → multiplier + quoteId (free)",
+  "/quote": {
+    body: `{\n  "stakeUsd": 5,\n  "legs": [\n    { "venue": "polymarket", "id": "PASTE_CONDITION_ID", "side": "yes" }\n  ]\n}`,
+    hint: "walks the real order book for your size → quoteId (free)",
   },
-  "/parlay/place": {
-    body: `{\n  "quoteId": "PASTE_QUOTE_ID"\n}`,
-    hint: "no X-PAYMENT → 402 with USDT terms on X Layer",
+  "/execute": {
+    body: `{\n  "conditionId": "PASTE_CONDITION_ID",\n  "side": "yes",\n  "price": 0.42,\n  "size": 10,\n  "signerAddress": "0xYourWalletAddress"\n}`,
+    hint: "no X-PAYMENT → 402 fee terms; paid → an unsigned order you sign yourself",
   },
 };
 

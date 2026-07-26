@@ -23,7 +23,7 @@ export function ScalarDocs({ specUrl }: { specUrl: string }) {
           hideDarkModeToggle: true,
           theme: "default",
           customCss: `
-            .scalar-app { --scalar-font: var(--font-geist-sans), sans-serif; }
+            .scalar-app { --scalar-font: var(--font-geist-sans), sans-display; }
           `,
         });
       }

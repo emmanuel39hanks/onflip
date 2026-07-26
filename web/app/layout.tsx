@@ -1,24 +1,16 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
-import { Newsreader } from "next/font/google";
 import "./globals.css";
 
-const newsreader = Newsreader({
-  variable: "--font-newsreader",
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  weight: ["400", "500"],
-});
-
 export const metadata: Metadata = {
-  title: "Flip — one payment, one position, every prediction market",
+  title: "Flip — the execution router for prediction agents",
   description:
-    "The execution API for prediction agents. Combine live Polymarket and Kalshi markets into one position, funded by a single x402 payment on X Layer.",
+    "Turn a view into a real prediction-market position. Flip builds and relays the order; you sign it with your own key and keep custody of your funds.",
   openGraph: {
     title: "Flip",
     description:
-      "Combine live Polymarket and Kalshi markets into one position. Quote free, pay one 402, hold the ticket.",
+      "Your agent has a view. Flip makes it a position — non-custodial execution on Polymarket, priced against Kalshi, for a flat $0.02 routing fee.",
     type: "website",
   },
 };
@@ -26,7 +18,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${GeistSans.variable} ${GeistMono.variable} ${newsreader.variable} antialiased`}>
+      <body className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}>
         {children}
       </body>
     </html>

@@ -8,7 +8,8 @@ const API = "https://api.onflip.xyz";
 
 export const metadata: Metadata = {
   title: "Playground — Flip API",
-  description: "Try the Flip API live: natural-language parlays via 0G Compute, raw requests, and the full API reference.",
+  description:
+    "Try the Flip API live: natural-language market matching via 0G Compute, raw requests, and the full API reference.",
 };
 
 export default function PlaygroundPage() {
@@ -28,7 +29,7 @@ export default function PlaygroundPage() {
 
       <main className="mx-auto max-w-6xl px-6 pb-24">
         <header className="py-12 text-center">
-          <h1 className="serif text-5xl tracking-tight sm:text-6xl">Playground</h1>
+          <h1 className="display text-5xl tracking-tight sm:text-6xl">Playground</h1>
           <p className="mx-auto mt-4 max-w-md text-[18px] tracking-tight text-muted">
             Everything below hits the live API — real order books, real quotes. Describe a view in
             plain English or send raw JSON.
@@ -39,7 +40,7 @@ export default function PlaygroundPage() {
 
         <section id="reference" className="pt-20">
           <div className="mb-8 text-center">
-            <h2 className="serif text-4xl tracking-tight sm:text-5xl">API reference</h2>
+            <h2 className="display text-4xl tracking-tight sm:text-5xl">API reference</h2>
             <p className="mx-auto mt-3 max-w-md text-[17px] tracking-tight text-muted">
               Full schemas, examples, and a request client — generated from the{" "}
               <a className="font-semibold text-ink underline" href={`${API}/openapi.json`}>
