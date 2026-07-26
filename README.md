@@ -1,98 +1,106 @@
 # Flip
 
-**An agent-callable execution ASP for prediction markets, on the OKX.AI marketplace.**
+**The execution router for prediction markets, on the OKX.AI agent marketplace.**
 
-Research agents surface conviction. Flip turns it into a position. Any agent (or a
-human with `curl`) can buy a single outcome on **Polymarket or Kalshi**, or combine up
-to six into one leveraged **parlay** — priced deterministically and settled by a single
-payment. Quotes are free; placing is paid over **x402 on X Layer** (`eip155:196`), and
-the payment *is* the stake: one USDT transfer funds the position and the fee in one hop.
+Research agents surface mispriced odds. Flip turns that view into a real
+position on **Polymarket**, with **Kalshi** priced alongside for comparison —
+and it does so **without ever holding your funds**.
 
-- **Live API** — https://api.onflip.xyz  ·  `GET /` for the manifest
-- **Site / docs / playground** — https://onflip.xyz
+Flip finds the market, prices your size against the live order book, and builds
+a ready-to-sign order. **You** sign it with your own key. The position lands in
+**your** wallet. Flip's only revenue is a flat **$0.02 routing fee** paid in
+USDT on X Layer over x402, plus a Polymarket builder fee of **0 bps**.
+
+- **Live API** — https://api.onflip.xyz · `GET /` for the manifest
+- **Site, docs, playground** — https://onflip.xyz
 
 ```
- conviction ──▶ /markets (search) ──▶ /quote (price, free) ──▶ /place (x402, paid) ──▶ ticket
+view ──▶ /markets ──▶ /quote ──▶ /execute ($0.02) ──▶ YOU SIGN ──▶ /submit ──▶ position in your wallet
 ```
+
+## Why it cannot take your money
+
+Polymarket separates two powers:
+
+| Capability | Your private key | What Flip has |
+|---|---|---|
+| Create and sign an order | yes | **no** |
+| Post an already-signed order | yes | yes |
+| Cancel orders, read balances | yes | yes |
+| Withdraw funds | yes | **no** |
+
+Flip operates strictly at the posting level. `src/router/polymarket.ts` drives
+Polymarket's own `OrderBuilder` with a `CapturingSigner` — an object that holds
+no key, records the EIP-712 payload that needs signing, and returns a
+placeholder the exchange rejects. There is no key material in the process.
+
+Every order returned by `/execute` is unsigned; check for yourself. The response
+also includes a `postItYourself` block, so the relay is optional.
 
 ## Endpoints
 
 | Endpoint | Cost | What it does |
 |---|---|---|
-| `GET /` | free | service manifest (discovery) |
-| `GET /markets?q=fed` | free | unified live search across both venues |
-| `POST /quote` | free | `{ legs, stakeUsd }` → multiplier, payout, `quoteId` (valid 90s). 1 leg = single position, 2–6 = parlay |
-| `POST /nl/quote` | free | `{ text }` → natural language → quoted position (0G-hosted parsing, keyword fallback) |
-| `POST /place` | **x402** | `{ quoteId }` — 402 asks for stake + 1% in USDT on X Layer; the paid retry returns the ticket |
-| `GET /position/:id` | free | ticket status (legs resolve via venue data; a watcher settles) |
+| `GET /` | free | service manifest |
+| `GET /markets?q=` | free | unified search across Polymarket and Kalshi |
+| `POST /quote` | free | price a view against real book depth |
+| `POST /nl/quote` | free | plain English → matched markets → quote (0G Compute) |
+| `POST /execute` | **$0.02** | unsigned order + the EIP-712 payload to sign |
+| `POST /submit` | free | relay the order you signed |
+| `GET /positions/:wallet` | free | live positions, value and PnL |
 
-Aliases `/parlay/quote`, `/parlay/place`, `/parlay/:id` also work. Full schema at
-`GET /openapi.json`.
-
-## Pricing (deterministic, published)
-
-```
-fair     = Π 1/price_i              live executable prices — order books walked, not mids
-haircut  = 0.9 ^ same-category-pairs   correlation guard; duplicate markets rejected
-offered  = fair × haircut × (1 − 7% edge)
-caps     = 6 legs · $50 stake · 100× · $1,000 payout
-```
-
-Every quote returns fair vs offered multiplier side by side — no hidden vig.
+Full schema at `GET /openapi.json`.
 
 ## Run it locally
 
 ```bash
 pnpm install
-cp .env.example .env        # DEV_MODE=1 by default: simulates payment, no keys needed
+cp .env.example .env        # DEV_MODE=1 simulates the fee payment
 pnpm start                  # :8080
-pnpm test                   # deterministic pricing tests
+pnpm test                   # router + pricing tests
 
 curl 'localhost:8080/markets?q=fed'
-curl -X POST localhost:8080/quote -H 'Content-Type: application/json' \
-  -d '{"stakeUsd":5,"legs":[{"venue":"polymarket","id":"<conditionId>","side":"no"}]}'
-# → quoteId; POST /place with it → 402 terms → pay on X Layer → retry with X-PAYMENT → ticket
 ```
 
-Set the OKX facilitator keys and `DEV_MODE=0` to settle for real (see `.env.example`).
+## The reference agent
 
-## Test the money path (buyer agent)
-
-`agent/buyer.ts` is the customer side — it does exactly what an OKX.AI agent does:
-discover a market, quote, hit the 402, and read back the payment terms.
+`agent/buyer.ts` is the customer side — it does exactly what an OKX.AI agent
+does, including signing locally with its own key.
 
 ```bash
-FLIP_API=https://api.onflip.xyz npx tsx agent/buyer.ts market fed
-FLIP_API=https://api.onflip.xyz npx tsx agent/buyer.ts single "will there be no fed rate change" 5
+AGENT_PK=0x…  FLIP_API=http://localhost:8080 \
+  npx tsx agent/buyer.ts buy <conditionId> yes 0.42 10
 ```
 
-The 402 handshake and terms are fully exercised here. Real on-chain settlement of USDT on
-X Layer runs through the OKX Payment runtime (AA wallet + Session Key + Permit2), which is
-what executes when a buyer calls Flip from the OKX.AI marketplace.
+To trade for real you need a funded Polymarket account (deposit once at
+polymarket.com to create the proxy wallet that holds collateral), then pass
+`funderAddress` and `signatureType: 2`.
 
 ## Layout
 
 ```
 src/
-  server.ts          HTTP surface + manifest
-  x402.ts            402 gate → verify/settle via OKX facilitator
-  nl.ts              natural language → legs (0G Compute, TEE-attested; keyword fallback)
-  openapi.ts         OpenAPI 3 doc served at /openapi.json
-  ratelimit.ts       per-IP limits + a global daily model budget (abuse guard)
-  parlay/pricing.ts  deterministic multiplier engine (+ pricing.test.ts)
-  parlay/tickets.ts  persisted ticket store + settlement watcher
-  venues/            Polymarket + Kalshi adapters (public data; order books walked)
-agent/buyer.ts       buyer-side reference agent
-web/                 Next.js landing, GitBook-style docs, API playground
+  server.ts             HTTP surface + manifest
+  router/polymarket.ts  order building, relay, positions — the core
+  x402.ts               402 gate for the routing fee
+  nl.ts                 natural language → markets (0G, TEE-attested)
+  openapi.ts            OpenAPI 3.1 served at /openapi.json
+  ratelimit.ts          per-IP limits + a daily model budget
+  parlay/pricing.ts     deterministic multiplier engine
+  venues/               Polymarket + Kalshi adapters (book-walking)
+agent/buyer.ts          self-custody reference agent
+web/                    Next.js landing, docs, playground
 ```
 
-## Deployment
+## Venues
 
-Two services from this repo: the API (`Dockerfile`) and the site (`web.Dockerfile`),
-both on Railway behind `api.onflip.xyz` / `onflip.xyz`.
+**Polymarket** is executable — orders route and settle there. **Kalshi** is
+read-only: submitting orders on a customer's behalf requires CFTC registration
+as an FCM or introducing broker, which no router holds. We price it alongside so
+you can see when it is the better venue.
 
 ## Roadmap
 
-- Treasury payouts on-chain (USDT on X Layer) at settlement
-- Per-leg hedging on venue accounts (Polymarket CLOB / Kalshi API keys)
-- Deeper venue coverage and live correlation modelling beyond the category haircut
+- Sequential plans: roll a winning position into the next leg
+- Simultaneous multi-leg parlays, which require an escrow counterparty
+- Verified builder tier (higher relay limits, volume rewards)
