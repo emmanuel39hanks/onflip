@@ -32,7 +32,7 @@ const Quote = {
   properties: {
     quoteId: { type: "string" },
     validForSeconds: { type: "integer" },
-    type: { type: "string", enum: ["single", "parlay"] },
+    type: { type: "string", enum: ["single", "basket"] },
     legs: {
       type: "array",
       items: {
@@ -237,8 +237,10 @@ export function buildOpenApi(baseUrl: string) {
           tags: ["Discovery"],
           summary: "Price a view (free)",
           description:
-            "Walks the real order book for your size — never midpoints. One leg prices a single " +
-            "position; 2-6 legs return the combined multiplier for a sequential plan.",
+            "Walks the real order book for your size — never midpoints. One market returns a " +
+            "directly executable quote. Several markets are priced as a basket of independent " +
+            "positions: Flip does not sell combined all-or-nothing parlays, so no combined " +
+            "payout is offered.",
           requestBody: {
             required: true,
             content: {

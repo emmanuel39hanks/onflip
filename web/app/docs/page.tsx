@@ -323,8 +323,8 @@ X-PAYMENT-REQUIRED: <base64 of this body>
               m: "POST",
               p: "/quote",
               cost: "free",
-              d: "Price a view against real order-book depth for your size.",
-              params: "legs: [{ venue, id, side }] (1–6) · stakeUsd: number",
+              d: "Price a view against real depth. One market is executable; several are priced as a basket of independent positions.",
+              params: "legs: [{ venue, id, side }] (1–6, priced independently) · stakeUsd: number",
             },
             {
               m: "POST",

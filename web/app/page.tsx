@@ -78,8 +78,8 @@ const ENDPOINTS = [
   {
     m: "POST",
     p: "/quote",
-    d: "Price a view. Order books walked for your real size, not midpoints.",
-    r: "Quote — fairMultiplier, offeredMultiplier, quoteId (90s)",
+    d: "Price a view against real book depth. One market, or a basket of independent ones.",
+    r: "Quote — price, implied multiplier, quoteId (90s)",
     cost: "free",
   },
   {

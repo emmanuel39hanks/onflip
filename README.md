@@ -43,7 +43,7 @@ also includes a `postItYourself` block, so the relay is optional.
 |---|---|---|
 | `GET /` | free | service manifest |
 | `GET /markets?q=` | free | unified search across Polymarket and Kalshi |
-| `POST /quote` | free | price a view against real book depth |
+| `POST /quote` | free | price a view against real book depth (one market, or a basket of independent ones) |
 | `POST /nl/quote` | free | plain English → matched markets → quote (0G Compute) |
 | `POST /execute` | **$0.02** | unsigned order + the EIP-712 payload to sign |
 | `POST /submit` | free | relay the order you signed |

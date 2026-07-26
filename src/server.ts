@@ -170,11 +170,12 @@ const MANIFEST = {
     },
     "POST /quote": {
       description:
-        "Price a view. One leg returns a single position; 2-6 legs return the combined multiplier " +
-        "for a sequential plan. Walks the real order book for the requested size.",
+        "Price a view against real order-book depth for your size. One market returns a " +
+        "directly executable quote; several are priced as independent positions (a basket) — " +
+        "Flip does not sell combined all-or-nothing parlays.",
       cost: "free",
       parameters: {
-        legs: "array of { venue: 'polymarket'|'kalshi', id: string, side: 'yes'|'no' } — 1 to 6 entries",
+        legs: "array of { venue: 'polymarket'|'kalshi', id: string, side: 'yes'|'no' } — 1 to 6 entries; each is priced and executed independently",
         stakeUsd: "number (optional, default 5) — the size you intend to trade",
       },
       example: {
@@ -316,13 +317,50 @@ export function startHttp(port: number) {
         const price = priceParlay(legs, stakeUsd, pricingFromEnv());
         const id = quoteId(price);
         quoteCache.set(id, { price, expiresAt: Date.now() + 90_000 });
+
+        const executable = price.legs.filter((l) => l.venue === "polymarket").map((l) => l.id);
+
+        // One market is directly executable. Several markets are priced as
+        // independent positions: Flip does not sell a combined all-or-nothing
+        // payout, so it must not quote one as though it were purchasable.
+        if (price.legs.length === 1) {
+          return json(res, 200, {
+            quoteId: id,
+            validForSeconds: 90,
+            ...price,
+            executable,
+            nextStep:
+              "POST /execute with { conditionId, side, price, size, signerAddress } to get a ready-to-sign order",
+          });
+        }
+
         return json(res, 200, {
           quoteId: id,
           validForSeconds: 90,
-          ...price,
-          executable: price.legs.filter((l) => l.venue === "polymarket").map((l) => l.id),
+          type: "basket",
+          stakeUsd,
+          legs: price.legs.map((l) => ({
+            venue: l.venue,
+            id: l.id,
+            side: l.side,
+            question: l.question,
+            price: l.price,
+            impliedMultiplier: Math.floor((1 / l.price) * 100) / 100,
+            executable: l.venue === "polymarket",
+          })),
+          notCombinable: {
+            reason:
+              "Flip executes each market as its own position. A combined all-or-nothing payout " +
+              "would need a counterparty to underwrite it, which Flip does not do.",
+            hypotheticalCombinedMultiplier: price.offeredMultiplier,
+            note:
+              "What an all-or-nothing parlay across these markets would be worth. Shown for " +
+              "reference only — it is NOT purchasable here.",
+          },
+          executable,
+          warnings: price.warnings,
           nextStep:
-            "POST /execute with { conditionId, side, price, size, signerAddress } to get a ready-to-sign order",
+            "POST /execute once per market you want. Each returns its own signable order.",
         });
       }
 
