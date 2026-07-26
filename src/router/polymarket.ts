@@ -14,18 +14,26 @@
  *   2. (agent signs locally with its own key — off-box, never here)
  *   3. relayOrder()  → attach the agent's signature, POST to the CLOB
  *
- * Amount/rounding math is delegated to @polymarket/clob-client so our orders
- * are byte-identical to ones built by Polymarket's own SDK.
+ * Amount/rounding math is delegated to @polymarket/clob-client-v2 so our
+ * orders are byte-identical to ones built by Polymarket's own SDK. Flip's
+ * builder code travels inside the order the agent signs, so routing
+ * attribution is visible to the agent rather than bolted on afterwards.
  */
 
-import { ClobClient, OrderBuilder, OrderSide, SignatureType } from "@polymarket/clob-client";
-import type { SignedOrder, TickSize, UserOrder } from "@polymarket/clob-client";
+import { ClobClient, OrderBuilder, Side, SignatureTypeV2 } from "@polymarket/clob-client-v2";
+import type { SignedOrder, TickSize, UserOrderV2 } from "@polymarket/clob-client-v2";
 
 const CLOB_HOST = process.env.POLYMARKET_CLOB_HOST ?? "https://clob.polymarket.com";
 const GAMMA = "https://gamma-api.polymarket.com";
 const POLYGON = 137;
 
-/** Set by the operator; tags routed volume for the Builder Program. Optional. */
+/** Order format. V2 is what the exchange accepts today. */
+const ORDER_VERSION = 2;
+
+/**
+ * Public Builder Program identifier (bytes32). It is carried inside the order
+ * the agent signs, so the agent can see exactly who routed its trade.
+ */
 const BUILDER_CODE = process.env.POLYMARKET_BUILDER_CODE;
 
 export class RouterError extends Error {}
@@ -41,7 +49,7 @@ export class RouterError extends Error {}
  * one that is incapable of producing a valid signature.
  */
 class CapturingSigner {
-  captured?: { domain: unknown; types: unknown; value: unknown; primaryType?: string };
+  captured?: { domain: unknown; types: unknown; value: unknown };
 
   constructor(private readonly address: string) {}
 
@@ -50,7 +58,7 @@ class CapturingSigner {
   }
 
   async _signTypedData(domain: unknown, types: unknown, value: unknown): Promise<string> {
-    this.captured = { domain, types, value, primaryType: "Order" };
+    this.captured = { domain, types, value };
     // 65-byte placeholder. Structurally valid, cryptographically worthless —
     // it is replaced by the agent's real signature in relayOrder().
     return `0x${"00".repeat(65)}`;
@@ -90,7 +98,7 @@ function parseArr(raw: unknown): string[] {
 }
 
 /** Read-only client: no signer, no creds — used for public market data. */
-const publicClient = new ClobClient(CLOB_HOST, POLYGON);
+const publicClient = new ClobClient({ host: CLOB_HOST, chain: POLYGON });
 
 /**
  * Everything needed to place a valid order on a market. Tick size and minimum
@@ -146,8 +154,8 @@ export interface BuildRouteParams {
    * For a Polymarket proxy/Safe, pass the proxy address.
    */
   funderAddress?: string;
-  /** 0 = EOA (default), 1 = email/Magic proxy, 2 = browser Gnosis Safe. */
-  signatureType?: 0 | 1 | 2;
+  /** 0 = EOA (default), 1 = email/Magic proxy, 2 = Gnosis Safe, 3 = EIP-1271. */
+  signatureType?: 0 | 1 | 2 | 3;
 }
 
 export interface Route {
@@ -170,17 +178,6 @@ export interface Route {
   builderCode?: string;
 }
 
-function assertPrice(price: number, tickSize: TickSize) {
-  if (!(price > 0 && price < 1)) {
-    throw new RouterError(`price must be between 0 and 1 (got ${price})`);
-  }
-  const tick = Number(tickSize);
-  const steps = price / tick;
-  if (Math.abs(steps - Math.round(steps)) > 1e-9) {
-    throw new RouterError(`price ${price} is not a multiple of this market's tick size ${tickSize}`);
-  }
-}
-
 /**
  * Build a ready-to-sign order. Nothing here can move funds: the returned
  * order is inert until the agent signs `typedData` with its own key.
@@ -188,16 +185,17 @@ function assertPrice(price: number, tickSize: TickSize) {
 export async function buildRoute(params: BuildRouteParams): Promise<Route> {
   const market = await execMarket(params.conditionId);
   if (market.closed) throw new RouterError(`market is closed: ${market.question}`);
-  if (!market.acceptingOrders) throw new RouterError(`market is not accepting orders`);
+  if (!market.acceptingOrders) throw new RouterError("market is not accepting orders");
 
   const tokenId = params.side === "yes" ? market.tokenIds[0] : market.tokenIds[1];
 
   // Snap price to the market's tick, then validate — clearer errors than the
   // exchange's generic rejection.
   const tick = Number(market.tickSize);
-  const price = Math.round(params.price / tick) * tick;
-  assertPrice(Number(price.toFixed(6)), market.tickSize);
-
+  const price = Number((Math.round(params.price / tick) * tick).toFixed(6));
+  if (!(price > 0 && price < 1)) {
+    throw new RouterError(`price must be between 0 and 1 (got ${params.price})`);
+  }
   if (!(params.size > 0)) throw new RouterError("size must be positive");
   if (params.size < market.minOrderSize) {
     throw new RouterError(
@@ -209,28 +207,28 @@ export async function buildRoute(params: BuildRouteParams): Promise<Route> {
   const builder = new OrderBuilder(
     signer as never,
     POLYGON,
-    (params.signatureType ?? SignatureType.EOA) as SignatureType,
+    (params.signatureType ?? SignatureTypeV2.EOA) as SignatureTypeV2,
     params.funderAddress ?? params.signerAddress
   );
 
-  const userOrder: UserOrder = {
+  const userOrder: UserOrderV2 = {
     tokenID: tokenId,
-    price: Number(price.toFixed(6)),
+    price,
     size: params.size,
-    // Always BUY: buying NO is expressed by buying the NO token, not by selling YES.
-    side: OrderSide.BUY as unknown as UserOrder["side"],
+    // Always BUY: buying NO is expressed by buying the NO token, not selling YES.
+    side: Side.BUY,
+    ...(BUILDER_CODE ? { builderCode: BUILDER_CODE } : {}),
   };
 
   // Runs Polymarket's own amount/rounding math. The signature it produces is
   // the placeholder from CapturingSigner and is discarded below.
-  const built = (await builder.buildOrder(userOrder, {
-    tickSize: market.tickSize,
-    negRisk: market.negRisk,
-  })) as SignedOrder;
+  const built = (await builder.buildOrder(
+    userOrder,
+    { tickSize: market.tickSize, negRisk: market.negRisk },
+    ORDER_VERSION
+  )) as SignedOrder & { signature: string };
 
-  const { signature: _placeholder, ...unsignedOrder } = built as SignedOrder & {
-    signature: string;
-  };
+  const { signature: _placeholder, ...unsignedOrder } = built;
 
   if (!signer.captured) {
     throw new RouterError("internal: order typed data was not captured");
@@ -250,7 +248,7 @@ export async function buildRoute(params: BuildRouteParams): Promise<Route> {
     typedData: { domain, types, primaryType: "Order", message: value },
     cost: {
       shares: params.size,
-      pricePerShare: Number(price.toFixed(6)),
+      pricePerShare: price,
       totalUsdc: Number((params.size * price).toFixed(6)),
     },
     builderCode: BUILDER_CODE,
@@ -279,7 +277,7 @@ export async function relayOrder(
   signature: string,
   creds: RelayCreds,
   agentAddress: string,
-  opts?: { signatureType?: 0 | 1 | 2; funderAddress?: string }
+  opts?: { signatureType?: 0 | 1 | 2 | 3; funderAddress?: string }
 ): Promise<unknown> {
   if (!/^0x[0-9a-fA-F]{130}$/.test(signature)) {
     throw new RouterError("signature must be a 0x-prefixed 65-byte hex string");
@@ -287,20 +285,46 @@ export async function relayOrder(
 
   const signed = { ...order, signature } as unknown as SignedOrder;
 
-  const client = new ClobClient(
-    CLOB_HOST,
-    POLYGON,
-    new CapturingSigner(agentAddress) as never,
-    { key: creds.apiKey, secret: creds.secret, passphrase: creds.passphrase },
-    (opts?.signatureType ?? SignatureType.EOA) as SignatureType,
-    opts?.funderAddress ?? agentAddress
-  );
+  const client = new ClobClient({
+    host: CLOB_HOST,
+    chain: POLYGON,
+    signer: new CapturingSigner(agentAddress) as never,
+    creds: { key: creds.apiKey, secret: creds.secret, passphrase: creds.passphrase },
+    signatureType: (opts?.signatureType ?? SignatureTypeV2.EOA) as SignatureTypeV2,
+    funderAddress: opts?.funderAddress ?? agentAddress,
+  });
 
   try {
-    return await client.postOrder(signed);
+    const result = (await client.postOrder(signed)) as { error?: string } | undefined;
+    if (result?.error) throw new Error(result.error);
+    return result;
   } catch (err) {
-    throw new RouterError(`CLOB rejected the order: ${String(err instanceof Error ? err.message : err).slice(0, 300)}`);
+    throw new RouterError(explainClobError(String(err instanceof Error ? err.message : err)));
   }
+}
+
+/**
+ * Turn the exchange's terse rejections into something an agent operator can
+ * act on. The account-setup case is by far the most common first-run failure.
+ */
+function explainClobError(raw: string): string {
+  const msg = raw.slice(0, 300);
+  if (/maker address not allowed|deposit wallet flow/i.test(msg)) {
+    return (
+      "Polymarket does not recognise this wallet as a funded trading account. " +
+      "A plain EOA cannot trade directly: deposit USDC once at https://polymarket.com to create " +
+      "your proxy wallet, then call /execute with funderAddress = <your proxy address> and " +
+      "signatureType = 2 (Gnosis Safe proxy) or 1 (email/Magic proxy). " +
+      `[exchange said: ${msg}]`
+    );
+  }
+  if (/not enough balance|insufficient/i.test(msg)) {
+    return `Not enough USDC in the funding wallet to cover this order. [exchange said: ${msg}]`;
+  }
+  if (/invalid order version/i.test(msg)) {
+    return `Order format rejected — Flip needs updating to the exchange's current order version. [exchange said: ${msg}]`;
+  }
+  return `CLOB rejected the order: ${msg}`;
 }
 
 /** The exact HTTP call an agent can make itself instead of using our relay. */
@@ -314,7 +338,11 @@ export function relayInstructions(order: Record<string, unknown>) {
     auth:
       "Polymarket L2 headers (POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_API_KEY, POLY_PASSPHRASE) " +
       "derived from your own key — see https://docs.polymarket.com/api-reference/authentication",
-    body: { order: { ...order, signature: "<your 0x… signature>" }, owner: "<your api key>", orderType: "GTC" },
+    body: {
+      order: { ...order, signature: "<your 0x… signature>" },
+      owner: "<your api key>",
+      orderType: "GTC",
+    },
   };
 }
 

@@ -1,39 +1,40 @@
 /**
- * Flip buyer agent — the customer side of the ASP.
+ * Flip reference agent — the customer side of the router.
  *
- * This is exactly what an OKX.AI agent does when it calls Flip: it discovers
- * a market, quotes a position, hits the x402 gate, signs a USDT payment on
- * X Layer, and retries to receive the ticket. We run this against our own
- * deployed endpoint to prove the whole money path end to end BEFORE listing.
+ * This is what an agent on OKX.AI does when it acts on a view: find a market,
+ * price it, pay Flip's routing fee over x402, receive a ready-to-sign order,
+ * SIGN IT WITH ITS OWN KEY, and send it on to Polymarket.
  *
- * The x402 "exact" EVM scheme (coinbase/x402): the client signs an
- * EIP-3009 `transferWithAuthorization` (EIP-712 typed data) authorizing the
- * facilitator to pull `maxAmountRequired` of USDT from the buyer to `payTo`.
- * The signed authorization is base64-JSON in the `X-PAYMENT` header; the
- * facilitator verifies + settles on-chain.
+ * The important line in this file is the one that signs. It happens here, in
+ * the agent's own process, with the agent's own key — never on Flip's server.
+ * Flip cannot produce this signature, which is why it can never move funds.
  *
  * Usage:
- *   BUYER_PK=0x…            # buyer wallet private key (funded: USDT + a little OKB)
+ *   AGENT_PK=0x…              your key (holds USDC on Polygon; signs orders)
  *   FLIP_API=https://api.onflip.xyz
- *   npx tsx agent/buyer.ts single "will there be no change in fed rates" 5
- *   npx tsx agent/buyer.ts nl "$5 the fed holds and btc clears 130k"
- *   npx tsx agent/buyer.ts market fed        # just search
+ *
+ *   npx tsx agent/buyer.ts markets bitcoin           # search (free)
+ *   npx tsx agent/buyer.ts quote <conditionId> yes   # price it (free)
+ *   npx tsx agent/buyer.ts buy <conditionId> yes 0.42 5   # pay fee, sign, submit
+ *   npx tsx agent/buyer.ts positions                 # what do I hold?
  */
 
-import {
-  createWalletClient,
-  http,
-  parseAbi,
-  toHex,
-  type Address,
-  type Hex,
-} from "viem";
+import { createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { polygon } from "viem/chains";
+import { ClobClient } from "@polymarket/clob-client";
 
 const API = process.env.FLIP_API ?? "https://api.onflip.xyz";
-const X_LAYER_CHAIN_ID = 196;
 
-/* ------------------------------- helpers -------------------------------- */
+/* ------------------------------- plumbing -------------------------------- */
+
+function account() {
+  const pk = process.env.AGENT_PK as Hex | undefined;
+  if (!pk) {
+    throw new Error("set AGENT_PK to your wallet key — Flip never sees it, it stays in this process");
+  }
+  return privateKeyToAccount(pk);
+}
 
 async function api(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${API}${path}`, {
@@ -47,180 +48,150 @@ function log(label: string, obj: unknown) {
   console.log(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2));
 }
 
-/* --------------------------- x402 payment sign --------------------------- */
-
-interface Accepts {
-  scheme: string;
-  network: string;
-  maxAmountRequired: string;
-  asset: Address;
-  payTo: Address;
-  maxTimeoutSeconds: number;
-}
+/* ------------------------------ x402 payment ------------------------------ */
 
 /**
- * Build + sign the x402 `exact` EVM payment payload (EIP-3009).
- * Returns the base64 X-PAYMENT header value.
+ * Pay Flip's routing fee. On OKX.AI the wallet runtime signs this for you;
+ * here we build the header directly so the flow runs anywhere.
+ *
+ * Against a DEV_MODE server any payload is accepted. In production OKX's
+ * runtime (AA wallet + session key + Permit2) produces the real one.
  */
-async function signPayment(accepts: Accepts, pk: Hex): Promise<string> {
-  const account = privateKeyToAccount(pk);
-  const wallet = createWalletClient({ account, transport: http() });
+function paymentHeader(): string {
+  return Buffer.from(
+    JSON.stringify({
+      x402Version: 1,
+      scheme: "exact",
+      network: "eip155:196",
+      payload: { via: "flip-reference-agent" },
+    })
+  ).toString("base64");
+}
 
-  const now = Math.floor(Date.now() / 1000);
-  const validAfter = BigInt(now - 60);
-  const validBefore = BigInt(now + accepts.maxTimeoutSeconds);
-  const nonce = toHex(crypto.getRandomValues(new Uint8Array(32))) as Hex;
+/* --------------------------------- flows ---------------------------------- */
 
-  // USDT (EIP-3009) EIP-712 domain on X Layer. name/version follow the
-  // deployed token; "USD Coin"/"2" is the common default — override via env
-  // if the X Layer USDT metadata differs.
-  const domain = {
-    name: process.env.USDT_EIP712_NAME ?? "USD Coin",
-    version: process.env.USDT_EIP712_VERSION ?? "2",
-    chainId: X_LAYER_CHAIN_ID,
-    verifyingContract: accepts.asset,
-  } as const;
+async function markets(query: string) {
+  const res = await api(`/markets?q=${encodeURIComponent(query)}&limit=8`);
+  const { markets } = (await res.json()) as {
+    markets: { venue: string; id: string; question: string; yesPrice: number | null }[];
+  };
+  log(
+    `markets matching "${query}"`,
+    markets.map((m) => `[${m.venue}] ${m.question}\n    yes ${m.yesPrice}  id ${m.id}`).join("\n")
+  );
+}
 
-  const types = {
-    TransferWithAuthorization: [
-      { name: "from", type: "address" },
-      { name: "to", type: "address" },
-      { name: "value", type: "uint256" },
-      { name: "validAfter", type: "uint256" },
-      { name: "validBefore", type: "uint256" },
-      { name: "nonce", type: "bytes32" },
-    ],
-  } as const;
+async function quote(conditionId: string, side: "yes" | "no", stakeUsd = 5) {
+  const res = await api("/quote", {
+    method: "POST",
+    body: JSON.stringify({ stakeUsd, legs: [{ venue: "polymarket", id: conditionId, side }] }),
+  });
+  log("quote", await res.json());
+}
 
-  const authorization = {
-    from: account.address,
-    to: accepts.payTo,
-    value: BigInt(accepts.maxAmountRequired),
-    validAfter,
-    validBefore,
-    nonce,
+/** The whole point: pay the fee, sign locally, send it on. */
+async function buy(conditionId: string, side: "yes" | "no", price: number, size: number) {
+  const acct = account();
+  console.log(`\x1b[2magent ${acct.address} — key never leaves this process\x1b[0m`);
+
+  // 1. Ask Flip to build the order. First call returns 402 with the fee terms.
+  const body = JSON.stringify({ conditionId, side, price, size, signerAddress: acct.address });
+  let res = await api("/execute", { method: "POST", body });
+
+  if (res.status === 402) {
+    const terms = (await res.json()) as { accepts: { maxAmountRequired: string; network: string }[] };
+    const fee = Number(terms.accepts[0].maxAmountRequired) / 1e6;
+    log("402 — routing fee due", `${fee} USDT on ${terms.accepts[0].network}`);
+    res = await api("/execute", { method: "POST", headers: { "X-PAYMENT": paymentHeader() }, body });
+  }
+
+  if (!res.ok) {
+    log(`/execute failed (${res.status})`, await res.json());
+    return;
+  }
+
+  const route = (await res.json()) as {
+    routeId: string;
+    market: { question: string; outcome: string };
+    cost: { shares: number; pricePerShare: number; totalUsdc: number };
+    order: Record<string, unknown>;
+    typedData: { domain: Record<string, unknown>; types: Record<string, unknown>; message: Record<string, unknown> };
+    custody: string;
   };
 
-  const signature = await wallet.signTypedData({
-    account,
-    domain,
-    types,
-    primaryType: "TransferWithAuthorization",
-    message: authorization,
+  log("Flip built an order", {
+    market: route.market.question,
+    buying: `${route.cost.shares} × ${route.market.outcome.toUpperCase()} @ ${route.cost.pricePerShare}`,
+    cost: `${route.cost.totalUsdc} USDC (from YOUR wallet, direct to Polymarket)`,
+    signedByFlip: "signature" in route.order,
+    custody: route.custody,
   });
 
-  const payload = {
-    x402Version: 1,
-    scheme: accepts.scheme,
-    network: accepts.network,
-    payload: {
+  // 2. Sign it. Here. With our own key. This is the step Flip cannot do.
+  const signature = await acct.signTypedData({
+    domain: route.typedData.domain as never,
+    types: route.typedData.types as never,
+    primaryType: "Order",
+    message: route.typedData.message as never,
+  });
+  log("signed locally", `${signature.slice(0, 30)}…  (${signature.length} chars)`);
+
+  // 3. Derive our own Polymarket L2 credentials. These can post and cancel
+  //    orders — they cannot sign new orders or withdraw. Then let Flip relay.
+  const wallet = createWalletClient({ account: acct, chain: polygon, transport: http() });
+  const clob = new ClobClient("https://clob.polymarket.com", 137, wallet as never);
+  const creds = await clob.createOrDeriveApiKey().catch((e: unknown) => {
+    console.error("could not derive L2 creds:", String(e).slice(0, 200));
+    return null;
+  });
+  if (!creds) {
+    log("no creds — post it yourself", "Use the `postItYourself` block returned by /execute.");
+    return;
+  }
+
+  const submit = await api("/submit", {
+    method: "POST",
+    body: JSON.stringify({
+      routeId: route.routeId,
       signature,
-      authorization: {
-        from: authorization.from,
-        to: authorization.to,
-        value: authorization.value.toString(),
-        validAfter: authorization.validAfter.toString(),
-        validBefore: authorization.validBefore.toString(),
-        nonce,
-      },
-    },
-  };
-  return Buffer.from(JSON.stringify(payload)).toString("base64");
-}
-
-/* --------------------------------- flows --------------------------------- */
-
-async function place(quoteId: string): Promise<void> {
-  const pk = process.env.BUYER_PK as Hex | undefined;
-
-  // 1) probe → expect 402 with terms
-  const probe = await api("/place", { method: "POST", body: JSON.stringify({ quoteId }) });
-  if (probe.status !== 402) {
-    log(`place → ${probe.status} (expected 402)`, await probe.json());
-    return;
-  }
-  const terms = (await probe.json()) as { accepts: Accepts[] };
-  const accepts = terms.accepts[0];
-  log("402 Payment Required — x402 terms", {
-    network: accepts.network,
-    amountUSDT: (Number(accepts.maxAmountRequired) / 1e6).toFixed(2),
-    asset: accepts.asset,
-    payTo: accepts.payTo,
+      creds: { apiKey: creds.key, secret: creds.secret, passphrase: creds.passphrase },
+    }),
   });
-
-  if (!pk) {
-    log("no BUYER_PK set", "Set BUYER_PK to a funded X Layer wallet to sign + settle the payment.");
-    return;
-  }
-
-  // 2) sign the EIP-3009 authorization
-  const xPayment = await signPayment(accepts, pk);
-  log("signed X-PAYMENT (base64, truncated)", xPayment.slice(0, 80) + "…");
-
-  // 3) retry with payment → expect 201 ticket
-  const paid = await api("/place", {
-    method: "POST",
-    headers: { "X-PAYMENT": xPayment },
-    body: JSON.stringify({ quoteId }),
-  });
-  log(`place + X-PAYMENT → ${paid.status}`, await paid.json());
+  log(`/submit → ${submit.status}`, await submit.json());
 }
 
-async function quoteSingle(query: string, stakeUsd: number, side: "yes" | "no"): Promise<void> {
-  const res = await api(`/markets?q=${encodeURIComponent(query)}&limit=1`);
-  const { markets } = (await res.json()) as { markets: { venue: string; id: string; question: string; yesPrice: number }[] };
-  if (!markets.length) return log("no market found", query);
-  const m = markets[0];
-  log("market", `[${m.venue}] ${m.question}  (yes ${m.yesPrice})`);
-
-  const q = await api("/quote", {
-    method: "POST",
-    body: JSON.stringify({ stakeUsd, legs: [{ venue: m.venue, id: m.id, side }] }),
-  });
-  const quote = (await q.json()) as { quoteId: string; type: string; offeredMultiplier: number; potentialPayoutUsd: number; totalChargeUsd: number };
-  log("quote (single position)", quote);
-  if (quote.quoteId) await place(quote.quoteId);
+async function showPositions() {
+  const acct = account();
+  const res = await api(`/positions/${acct.address}`);
+  const { positions } = (await res.json()) as { positions: unknown[] };
+  log(`positions for ${acct.address}`, positions.length ? positions : "none yet");
 }
 
-async function quoteNl(text: string): Promise<void> {
-  const r = await api("/nl/quote", { method: "POST", body: JSON.stringify({ text }) });
-  const parsed = (await r.json()) as { engine?: string; legs?: unknown[]; quote?: { quoteId: string; type: string; offeredMultiplier: number } };
-  log("nl → quote", parsed);
-  if (parsed.quote?.quoteId) await place(parsed.quote.quoteId);
-}
-
-async function searchOnly(query: string): Promise<void> {
-  const res = await api(`/markets?q=${encodeURIComponent(query)}&limit=6`);
-  const { markets } = (await res.json()) as { markets: { venue: string; id: string; question: string; yesPrice: number }[] };
-  log(`markets matching "${query}"`, markets.map((m) => `[${m.venue}] ${m.question} — yes ${m.yesPrice} — ${m.id}`));
-}
-
-/* --------------------------------- main ---------------------------------- */
+/* --------------------------------- main ----------------------------------- */
 
 async function main() {
-  const [cmd, arg, arg2] = process.argv.slice(2);
-  console.log(`\x1b[2mFlip buyer agent → ${API}\x1b[0m`);
+  const [cmd, ...rest] = process.argv.slice(2);
+  console.log(`\x1b[2mFlip reference agent → ${API}\x1b[0m`);
   switch (cmd) {
-    case "single":
-      return quoteSingle(arg ?? "fed rates", Number(arg2 ?? 5), "no");
-    case "yes":
-      return quoteSingle(arg ?? "fed rates", Number(arg2 ?? 5), "yes");
-    case "nl":
-      return quoteNl(arg ?? "$5 the fed holds and btc clears 130k");
-    case "market":
-      return searchOnly(arg ?? "fed");
+    case "markets":
+      return markets(rest[0] ?? "bitcoin");
+    case "quote":
+      return quote(rest[0], (rest[1] as "yes" | "no") ?? "yes", Number(rest[2] ?? 5));
+    case "buy":
+      if (rest.length < 4) return console.log("usage: buy <conditionId> <yes|no> <price> <size>");
+      return buy(rest[0], rest[1] as "yes" | "no", Number(rest[2]), Number(rest[3]));
+    case "positions":
+      return showPositions();
     default:
       console.log(
-        "usage:\n  npx tsx agent/buyer.ts market <query>\n" +
-          "  npx tsx agent/buyer.ts single <query> <stakeUsd>   (buys NO)\n" +
-          "  npx tsx agent/buyer.ts yes <query> <stakeUsd>      (buys YES)\n" +
-          "  npx tsx agent/buyer.ts nl \"<sentence>\"\n" +
-          "\nSet BUYER_PK=0x… (funded X Layer wallet) to sign + settle the payment."
+        "usage:\n" +
+          "  npx tsx agent/buyer.ts markets <query>\n" +
+          "  npx tsx agent/buyer.ts quote <conditionId> <yes|no> [stakeUsd]\n" +
+          "  npx tsx agent/buyer.ts buy <conditionId> <yes|no> <price> <size>\n" +
+          "  npx tsx agent/buyer.ts positions\n\n" +
+          "AGENT_PK is your key. It signs orders in this process and is never sent to Flip."
       );
   }
 }
 
 void main();
-
-// (parseAbi kept available for a future on-chain balance preflight)
-void parseAbi;

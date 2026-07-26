@@ -47,7 +47,7 @@ const quoteCache = new Map<string, QuoteCacheEntry>();
 interface RouteCacheEntry {
   route: Route;
   agentAddress: string;
-  signatureType?: 0 | 1 | 2;
+  signatureType?: 0 | 1 | 2 | 3;
   funderAddress?: string;
   expiresAt: number;
 }
@@ -203,7 +203,7 @@ const MANIFEST = {
         size: "number — number of shares; cost = size × price USDC",
         signerAddress: "string — your wallet address; signs the order and receives the position",
         funderAddress: "string (optional) — address holding the USDC, if different (proxy/Safe)",
-        signatureType: "integer (optional) — 0 = EOA (default), 1 = Magic/email proxy, 2 = Gnosis Safe",
+        signatureType: "integer (optional) — 0 = EOA (default), 1 = Magic/email proxy, 2 = Gnosis Safe, 3 = EIP-1271 contract wallet",
       },
       example: {
         request: {
@@ -339,7 +339,7 @@ export function startHttp(port: number) {
           size?: number;
           signerAddress?: string;
           funderAddress?: string;
-          signatureType?: 0 | 1 | 2;
+          signatureType?: 0 | 1 | 2 | 3;
         };
 
         if (!body.conditionId) return json(res, 400, { error: "conditionId is required (see GET /markets)" });
