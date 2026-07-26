@@ -18,6 +18,7 @@
   },
   "packageManager": "pnpm@9.15.9",
   "dependencies": {
+    "@polymarket/clob-client": "^5.8.1",
     "viem": "^2.55.4"
   }
 }

@@ -1,13 +1,19 @@
 /**
  * Flip ASP — HTTP surface.
  *
- *   GET  /                     service manifest (for okx.ai listing/discovery)
+ * Flip is an execution router for prediction markets. Agents keep custody of
+ * their own funds: Flip prices a view, builds the order, and relays it once
+ * the agent has signed it with its own key. Flip never holds a private key
+ * and never receives the stake — only a small routing fee over x402.
+ *
+ *   GET  /                     service manifest (discovery + full usage docs)
  *   GET  /health               liveness
- *   GET  /markets?q=&venue=    unified search (Polymarket + Kalshi), free
- *   POST /parlay/quote         price a parlay, free  { legs:[{venue,id,side}], stakeUsd }
- *   POST /parlay/place         x402-paid: the payment IS stake+fee → ticket
- *   GET  /parlay/:id           ticket status
- *   GET  /tickets              recent tickets (audit)
+ *   GET  /markets?q=           unified search (Polymarket + Kalshi), free
+ *   POST /quote                price a view across venues, free
+ *   POST /nl/quote             natural language -> quoted view, free
+ *   POST /execute              x402-paid: returns a ready-to-sign order
+ *   POST /submit               relay the agent's signed order to Polymarket
+ *   GET  /positions/:wallet    live positions for a wallet, free
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -16,19 +22,36 @@ import { polymarket } from "./venues/polymarket.js";
 import { kalshi } from "./venues/kalshi.js";
 import type { LegRequest, PricedLeg } from "./venues/types.js";
 import { priceParlay, pricingFromEnv, PricingError, type ParlayPrice } from "./parlay/pricing.js";
-import { tickets } from "./parlay/tickets.js";
 import { paymentRequirements, verifyAndSettle } from "./x402.js";
 import { parseNl, NL_PROVENANCE } from "./nl.js";
 import { buildOpenApi } from "./openapi.js";
 import { allowNl, allowWrite, clientIp, takeModelBudget } from "./ratelimit.js";
+import {
+  buildRoute,
+  relayInstructions,
+  relayOrder,
+  positions,
+  RouterError,
+  type Route,
+} from "./router/polymarket.js";
 
-const SERVICE_FEE_BPS = 100; // 1% of stake, on top, min $0.10
+/** Flat routing fee per executed order, in USDT on X Layer. */
+const ROUTE_FEE_USD = Number(process.env.ROUTE_FEE_USD ?? 0.02);
 
 interface QuoteCacheEntry {
   price: ParlayPrice;
   expiresAt: number;
 }
 const quoteCache = new Map<string, QuoteCacheEntry>();
+
+interface RouteCacheEntry {
+  route: Route;
+  agentAddress: string;
+  signatureType?: 0 | 1 | 2;
+  funderAddress?: string;
+  expiresAt: number;
+}
+const routeCache = new Map<string, RouteCacheEntry>();
 
 function json(res: ServerResponse, code: number, body: unknown, extraHeaders?: Record<string, string>) {
   const text = JSON.stringify(body, null, 2);
@@ -76,36 +99,151 @@ async function priceLegs(legsReq: LegRequest[], stakeUsd: number): Promise<Price
   );
 }
 
-function quoteId(price: ParlayPrice): string {
-  return createHash("sha256")
-    .update(JSON.stringify(price.legs.map((l) => [l.venue, l.id, l.side, l.price])))
-    .update(String(price.stakeUsd))
-    .digest("hex")
-    .slice(0, 16);
+function shortId(input: string): string {
+  return createHash("sha256").update(input).digest("hex").slice(0, 16);
 }
 
-function feeUsd(stakeUsd: number): number {
-  return Math.max(0.1, Math.round(stakeUsd * SERVICE_FEE_BPS) / 10000);
+function quoteId(price: ParlayPrice): string {
+  return shortId(
+    JSON.stringify(price.legs.map((l) => [l.venue, l.id, l.side, l.price])) + String(price.stakeUsd)
+  );
 }
 
 const MANIFEST = {
   name: "Flip",
-  tagline: "Turn conviction into a position — one x402 payment.",
+  tagline: "Turn research and conviction into a real position — without the manual hop to the market.",
   description:
-    "Flip is a paid API for agents. Buy a single prediction-market outcome (a straight " +
-    "YES/NO on Polymarket or Kalshi), or combine 2–6 markets into one leveraged parlay. " +
-    "Quote for free; place by paying stake + 1% fee in USDT on X Layer via x402. " +
-    "Deterministic pricing with a published edge, correlation haircut, and hard caps.",
-  venues: ["polymarket", "kalshi"],
-  payment: { protocol: "x402", network: "eip155:196", asset: "USDT" },
-  endpoints: {
-    "GET /markets?q=": "unified market search (free)",
-    "POST /quote": "{ legs:[{venue,id,side}], stakeUsd } → 1 leg = single position, 2-6 = parlay (free)",
-    "POST /place": "{ quoteId } + X-PAYMENT (stake+fee) → ticket",
-    "POST /nl/quote": "{ text } → natural-language → quoted position (free)",
-    "GET /position/:id": "ticket status (free)",
-    "aliases": "/parlay/quote, /parlay/place, /parlay/:id also work",
+    "Flip is an execution router for prediction markets. Research agents surface mispriced odds; " +
+    "Flip turns that view into an actual position on Polymarket. You keep custody of your funds " +
+    "at all times: Flip prices the view, compares Polymarket against Kalshi, and builds a " +
+    "ready-to-sign order — but YOUR key signs it and YOUR wallet holds the position. Flip has no " +
+    "private key and never receives your stake. It charges a flat routing fee per executed order, " +
+    "paid in USDT on X Layer over x402.",
+  howItWorks: [
+    "1. GET /markets?q=fed — find a market across Polymarket and Kalshi (free).",
+    "2. POST /quote — see the odds, the implied payout, and which venue is cheaper (free).",
+    "3. POST /execute — pay the routing fee via x402; receive an unsigned order plus the exact EIP-712 payload to sign.",
+    "4. Sign that payload locally with your own key. Flip cannot do this for you.",
+    "5. POST /submit — Flip relays your signed order to Polymarket. Or post it yourself; /execute tells you how.",
+    "6. GET /positions/:wallet — track fills, value, and PnL.",
+  ],
+  custody: {
+    model: "self-custody",
+    stakeCustody: "none — funds never leave the agent's wallet",
+    whoSigns: "the agent, with its own private key",
+    whyItIsSafe:
+      "Polymarket separates order signing (needs your private key) from order posting (needs only " +
+      "API credentials). Flip only ever operates at the posting level, so it cannot create an order " +
+      "you did not authorise and cannot withdraw your funds.",
   },
+  venues: {
+    polymarket: "executable — orders are routed and settled here",
+    kalshi: "reference pricing only — Kalshi does not permit third-party order routing",
+  },
+  payment: {
+    protocol: "x402",
+    network: "eip155:196",
+    networkName: "X Layer",
+    asset: "USDT",
+    model: "flat routing fee per executed order",
+    routeFeeUsd: ROUTE_FEE_USD,
+    note: "The fee is the only payment Flip receives. Your stake goes directly to Polymarket from your own wallet.",
+  },
+  requirements: {
+    forQuoting: "nothing — /markets, /quote and /nl/quote are free and open",
+    forExecuting: [
+      `USDT on X Layer (eip155:196) to pay the ${ROUTE_FEE_USD} routing fee`,
+      "USDC on Polygon in your own wallet — this is your stake, it never touches Flip",
+      "an EVM key you can sign EIP-712 typed data with",
+    ],
+  },
+  endpoints: {
+    "GET /markets": {
+      description: "Search live markets across Polymarket and Kalshi.",
+      cost: "free",
+      parameters: {
+        q: "string — search text, e.g. 'fed' or 'bitcoin'",
+        venue: "string (optional) — 'polymarket' or 'kalshi' to restrict results",
+        limit: "integer (optional, default 10, max 25)",
+      },
+      example: "GET /markets?q=bitcoin&limit=5",
+    },
+    "POST /quote": {
+      description:
+        "Price a view. One leg returns a single position; 2-6 legs return the combined multiplier " +
+        "for a sequential plan. Walks the real order book for the requested size.",
+      cost: "free",
+      parameters: {
+        legs: "array of { venue: 'polymarket'|'kalshi', id: string, side: 'yes'|'no' } — 1 to 6 entries",
+        stakeUsd: "number (optional, default 5) — the size you intend to trade",
+      },
+      example: {
+        request: {
+          stakeUsd: 5,
+          legs: [{ venue: "polymarket", id: "0x<conditionId>", side: "yes" }],
+        },
+      },
+    },
+    "POST /nl/quote": {
+      description: "Describe a view in plain English and get a quoted position back.",
+      cost: "free (rate limited)",
+      parameters: { text: "string — e.g. '$5 says the Fed holds rates in July'" },
+      example: { request: { text: "$5 says bitcoin clears 130k this month" } },
+    },
+    "POST /execute": {
+      description:
+        "Build a ready-to-sign Polymarket order. Returns the unsigned order, the exact EIP-712 " +
+        "typed data for you to sign with your own key, and instructions for posting it yourself " +
+        "if you would rather not use /submit.",
+      cost: `x402 — ${ROUTE_FEE_USD} USDT on X Layer`,
+      parameters: {
+        conditionId: "string — Polymarket condition id (from /markets)",
+        side: "string — 'yes' or 'no'",
+        price: "number — your limit price per share, 0..1, snapped to the market's tick size",
+        size: "number — number of shares; cost = size × price USDC",
+        signerAddress: "string — your wallet address; signs the order and receives the position",
+        funderAddress: "string (optional) — address holding the USDC, if different (proxy/Safe)",
+        signatureType: "integer (optional) — 0 = EOA (default), 1 = Magic/email proxy, 2 = Gnosis Safe",
+      },
+      example: {
+        request: {
+          conditionId: "0x<conditionId>",
+          side: "yes",
+          price: 0.42,
+          size: 10,
+          signerAddress: "0x<your wallet>",
+        },
+        returns: "{ routeId, order, typedData, cost, postItYourself }",
+      },
+    },
+    "POST /submit": {
+      description:
+        "Relay an order you have signed. Flip attaches your signature and posts it to Polymarket. " +
+        "Your L2 credentials can post and cancel orders only — they cannot sign new orders or " +
+        "withdraw funds. You can skip this endpoint entirely and post the order yourself.",
+      cost: "free — the routing fee was charged at /execute",
+      parameters: {
+        routeId: "string — from /execute",
+        signature: "string — 0x-prefixed 65-byte signature of the typed data",
+        creds: "object — { apiKey, secret, passphrase }: your own Polymarket L2 API credentials",
+      },
+      example: {
+        request: {
+          routeId: "<from /execute>",
+          signature: "0x…",
+          creds: { apiKey: "…", secret: "…", passphrase: "…" },
+        },
+      },
+    },
+    "GET /positions/:wallet": {
+      description: "Live positions, current value and PnL for any wallet.",
+      cost: "free",
+      parameters: { wallet: "string — the wallet address, in the path" },
+      example: "GET /positions/0x<your wallet>",
+    },
+  },
+  openapi: "/openapi.json",
+  docs: "https://onflip.xyz/docs",
 };
 
 export function startHttp(port: number) {
@@ -152,13 +290,8 @@ export function startHttp(port: number) {
           engine: parsed.engine,
           provenance: parsed.engine === "0g" ? NL_PROVENANCE : undefined,
           legs: parsed.legs,
-          quote: {
-            quoteId: id,
-            validForSeconds: 90,
-            ...price,
-            serviceFeeUsd: feeUsd(parsed.stakeUsd),
-            totalChargeUsd: Math.round((parsed.stakeUsd + feeUsd(parsed.stakeUsd)) * 100) / 100,
-          },
+          quote: { quoteId: id, validForSeconds: 90, ...price },
+          nextStep: "POST /execute with a polymarket conditionId to get a ready-to-sign order",
         });
       }
 
@@ -187,58 +320,143 @@ export function startHttp(port: number) {
           quoteId: id,
           validForSeconds: 90,
           ...price,
-          serviceFeeUsd: feeUsd(stakeUsd),
-          totalChargeUsd: Math.round((stakeUsd + feeUsd(stakeUsd)) * 100) / 100,
+          executable: price.legs.filter((l) => l.venue === "polymarket").map((l) => l.id),
+          nextStep:
+            "POST /execute with { conditionId, side, price, size, signerAddress } to get a ready-to-sign order",
         });
       }
 
-      if ((path === "/parlay/place" || path === "/place") && req.method === "POST") {
+      /* ----------------------------- execute ------------------------------ */
+
+      if (path === "/execute" && req.method === "POST") {
         if (!allowWrite(clientIp(req.headers))) {
           return json(res, 429, { error: "rate limited — 30 requests per minute" });
         }
-        const body = (await readBody(req)) as { quoteId?: string };
-        const entry = body.quoteId ? quoteCache.get(body.quoteId) : undefined;
-        if (!entry) return json(res, 400, { error: "unknown quoteId — call /parlay/quote first" });
-        if (Date.now() > entry.expiresAt) {
-          return json(res, 410, { error: "quote expired — re-quote and try again" });
+        const body = (await readBody(req)) as {
+          conditionId?: string;
+          side?: "yes" | "no";
+          price?: number;
+          size?: number;
+          signerAddress?: string;
+          funderAddress?: string;
+          signatureType?: 0 | 1 | 2;
+        };
+
+        if (!body.conditionId) return json(res, 400, { error: "conditionId is required (see GET /markets)" });
+        if (body.side !== "yes" && body.side !== "no") return json(res, 400, { error: "side must be 'yes' or 'no'" });
+        if (!body.signerAddress || !/^0x[0-9a-fA-F]{40}$/.test(body.signerAddress)) {
+          return json(res, 400, { error: "signerAddress must be your 0x wallet address" });
         }
-        const { price } = entry;
-        const total = price.stakeUsd + feeUsd(price.stakeUsd);
+        if (!(Number(body.price) > 0)) return json(res, 400, { error: "price is required (0..1)" });
+        if (!(Number(body.size) > 0)) return json(res, 400, { error: "size is required (number of shares)" });
+
         const requirement = paymentRequirements(
-          total,
-          `/parlay/place#${body.quoteId}`,
-          `Flip parlay: $${price.stakeUsd} stake at ${price.offeredMultiplier}x (+$${feeUsd(price.stakeUsd)} fee)`
+          ROUTE_FEE_USD,
+          `/execute#${body.conditionId}:${body.side}`,
+          `Flip routing fee — build a signable Polymarket order (${body.size} shares @ ${body.price})`
         );
 
         const paymentHeader = req.headers["x-payment"];
         if (!paymentHeader || typeof paymentHeader !== "string") {
           return payment402(res, requirement);
         }
-        const result = await verifyAndSettle(paymentHeader, requirement.accepts[0]);
-        if (!result.paid) return payment402(res, requirement, result.error);
+        const paid = await verifyAndSettle(paymentHeader, requirement.accepts[0]);
+        if (!paid.paid) return payment402(res, requirement, paid.error);
 
-        const idem = String(req.headers["x-idempotency-key"] ?? body.quoteId);
-        const ticket = tickets.create(
-          price,
-          { payer: result.payer, txHash: result.txHash, simulated: result.simulated },
-          idem
+        const route = await buildRoute({
+          conditionId: body.conditionId,
+          side: body.side,
+          price: Number(body.price),
+          size: Number(body.size),
+          signerAddress: body.signerAddress,
+          funderAddress: body.funderAddress,
+          signatureType: body.signatureType,
+        });
+
+        const routeId = shortId(JSON.stringify(route.order) + Date.now());
+        routeCache.set(routeId, {
+          route,
+          agentAddress: body.signerAddress,
+          signatureType: body.signatureType,
+          funderAddress: body.funderAddress,
+          expiresAt: Date.now() + 10 * 60_000,
+        });
+
+        return json(res, 200, {
+          routeId,
+          validForSeconds: 600,
+          market: route.market,
+          cost: route.cost,
+          order: route.order,
+          typedData: route.typedData,
+          nextStep:
+            "Sign `typedData` with your own key (viem: signTypedData / ethers: _signTypedData), " +
+            "then POST /submit { routeId, signature, creds }.",
+          postItYourself: relayInstructions(route.order),
+          payment: { feeUsd: ROUTE_FEE_USD, txHash: paid.txHash, simulated: paid.simulated },
+          custody: "Flip did not sign this order and holds no key. It is inert until you sign it.",
+          builderCode: route.builderCode,
+        });
+      }
+
+      /* ------------------------------ submit ------------------------------ */
+
+      if (path === "/submit" && req.method === "POST") {
+        if (!allowWrite(clientIp(req.headers))) {
+          return json(res, 429, { error: "rate limited — 30 requests per minute" });
+        }
+        const body = (await readBody(req)) as {
+          routeId?: string;
+          signature?: string;
+          creds?: { apiKey?: string; secret?: string; passphrase?: string };
+        };
+        const entry = body.routeId ? routeCache.get(body.routeId) : undefined;
+        if (!entry) return json(res, 400, { error: "unknown routeId — call /execute first" });
+        if (Date.now() > entry.expiresAt) {
+          return json(res, 410, { error: "route expired — call /execute again" });
+        }
+        if (!body.signature) return json(res, 400, { error: "signature is required" });
+        const { apiKey, secret, passphrase } = body.creds ?? {};
+        if (!apiKey || !secret || !passphrase) {
+          return json(res, 400, {
+            error:
+              "creds { apiKey, secret, passphrase } are required — derive them from your own key " +
+              "(clob-client: createOrDeriveApiKey). They cannot withdraw funds. " +
+              "Alternatively post the order yourself using the `postItYourself` block from /execute.",
+          });
+        }
+
+        const result = await relayOrder(
+          entry.route.order,
+          body.signature,
+          { apiKey, secret, passphrase },
+          entry.agentAddress,
+          { signatureType: entry.signatureType, funderAddress: entry.funderAddress }
         );
-        return json(res, 201, { ticket, payment: result });
+        routeCache.delete(body.routeId!);
+        return json(res, 201, {
+          submitted: true,
+          market: entry.route.market,
+          cost: entry.route.cost,
+          result,
+          trackAt: `/positions/${entry.agentAddress}`,
+        });
       }
 
-      if ((path.startsWith("/parlay/") || path.startsWith("/position/")) && req.method === "GET") {
-        const t = tickets.get(path.replace(/^\/(parlay|position)\//, ""));
-        if (!t) return json(res, 404, { error: "ticket not found" });
-        return json(res, 200, { ticket: t });
-      }
+      /* ----------------------------- positions ---------------------------- */
 
-      if (path === "/tickets" && req.method === "GET") {
-        return json(res, 200, { tickets: tickets.list().slice(0, 50) });
+      if (path.startsWith("/positions/") && req.method === "GET") {
+        const wallet = path.replace("/positions/", "").trim();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+          return json(res, 400, { error: "path must be /positions/0x<wallet address>" });
+        }
+        return json(res, 200, { wallet, positions: await positions(wallet) });
       }
 
       return json(res, 404, { error: "not found", see: "GET / for the manifest" });
     } catch (err) {
       if (err instanceof PricingError) return json(res, 400, { error: err.message });
+      if (err instanceof RouterError) return json(res, 422, { error: err.message });
       return json(res, 500, { error: String(err instanceof Error ? err.message : err).slice(0, 300) });
     }
   });
