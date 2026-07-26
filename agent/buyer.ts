@@ -22,7 +22,7 @@
 import { createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
-import { ClobClient } from "@polymarket/clob-client";
+import { ClobClient } from "@polymarket/clob-client-v2";
 
 const API = process.env.FLIP_API ?? "https://api.onflip.xyz";
 
@@ -139,7 +139,7 @@ async function buy(conditionId: string, side: "yes" | "no", price: number, size:
   // 3. Derive our own Polymarket L2 credentials. These can post and cancel
   //    orders — they cannot sign new orders or withdraw. Then let Flip relay.
   const wallet = createWalletClient({ account: acct, chain: polygon, transport: http() });
-  const clob = new ClobClient("https://clob.polymarket.com", 137, wallet as never);
+  const clob = new ClobClient({ host: "https://clob.polymarket.com", chain: 137, signer: wallet as never });
   const creds = await clob.createOrDeriveApiKey().catch((e: unknown) => {
     console.error("could not derive L2 creds:", String(e).slice(0, 200));
     return null;

@@ -213,7 +213,7 @@ const MANIFEST = {
           size: 10,
           signerAddress: "0x<your wallet>",
         },
-        returns: "{ routeId, order, typedData, cost, postItYourself }",
+        returns: "{ routeId, order, typedData, cost, builderFee, postItYourself }",
       },
     },
     "POST /submit": {
@@ -387,6 +387,7 @@ export function startHttp(port: number) {
           validForSeconds: 600,
           market: route.market,
           cost: route.cost,
+          builderFee: route.builderFee,
           order: route.order,
           typedData: route.typedData,
           nextStep:

@@ -100,6 +100,54 @@ function parseArr(raw: unknown): string[] {
 /** Read-only client: no signer, no creds — used for public market data. */
 const publicClient = new ClobClient({ host: CLOB_HOST, chain: POLYGON });
 
+export interface BuilderFee {
+  takerBps: number;
+  makerBps: number;
+  estimatedUsdc: number;
+  note: string;
+}
+
+let builderFeeCache: { takerBps: number; makerBps: number; at: number } | undefined;
+
+/**
+ * What Flip charges on the trade itself, read from Polymarket's public builder
+ * registry (never asserted by us). Quoted to the agent BEFORE it signs, so the
+ * total cost of routing is never a post-trade surprise.
+ */
+export async function builderFee(notionalUsdc: number): Promise<BuilderFee> {
+  const zero: BuilderFee = {
+    takerBps: 0,
+    makerBps: 0,
+    estimatedUsdc: 0,
+    note: "Flip takes 0% of your trade. The routing fee paid at /execute is our only charge.",
+  };
+  if (!BUILDER_CODE) return zero;
+
+  try {
+    if (!builderFeeCache || Date.now() - builderFeeCache.at > 300_000) {
+      const r = await getJson(`${CLOB_HOST}/fees/builder-fees/${BUILDER_CODE}`);
+      builderFeeCache = {
+        takerBps: Number(r.builder_taker_fee_rate_bps ?? 0),
+        makerBps: Number(r.builder_maker_fee_rate_bps ?? 0),
+        at: Date.now(),
+      };
+    }
+  } catch {
+    return zero; // never block a trade on a fee lookup
+  }
+
+  const { takerBps, makerBps } = builderFeeCache;
+  if (takerBps === 0 && makerBps === 0) return zero;
+  return {
+    takerBps,
+    makerBps,
+    estimatedUsdc: Number(((notionalUsdc * takerBps) / 10_000).toFixed(6)),
+    note:
+      `Flip's builder fee is ${takerBps} bps taker / ${makerBps} bps maker, charged by Polymarket ` +
+      `on fills and verifiable at ${CLOB_HOST}/fees/builder-fees/${BUILDER_CODE}.`,
+  };
+}
+
 /**
  * Everything needed to place a valid order on a market. Tick size and minimum
  * order size are fetched live — they vary per market and a wrong value is
@@ -175,6 +223,8 @@ export interface Route {
    */
   typedData: { domain: unknown; types: unknown; primaryType: string; message: unknown };
   cost: { shares: number; pricePerShare: number; totalUsdc: number };
+  /** What Flip earns on the trade itself. Disclosed before signing. */
+  builderFee: BuilderFee;
   builderCode?: string;
 }
 
@@ -251,6 +301,7 @@ export async function buildRoute(params: BuildRouteParams): Promise<Route> {
       pricePerShare: price,
       totalUsdc: Number((params.size * price).toFixed(6)),
     },
+    builderFee: await builderFee(params.size * price),
     builderCode: BUILDER_CODE,
   };
 }
